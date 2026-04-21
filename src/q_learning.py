@@ -1,4 +1,7 @@
+from __future__ import annotations
+
 from dataclasses import dataclass
+from typing import Iterator
 
 import numpy as np
 
@@ -10,6 +13,28 @@ class QLearningMetrics:
     episode_rewards: list[float]
     episode_steps: list[int]
     epsilons: list[float]
+
+
+@dataclass(frozen=True)
+class StepEvent:
+    """A single TD step emitted by `QLearningAgent.train_stream`.
+
+    Fields let a UI draw the current state of training without needing to
+    reimplement any of the Q-update logic.
+    """
+
+    episode: int
+    step: int
+    state: tuple[int, int]
+    action: Action
+    next_state: tuple[int, int]
+    reward: float
+    done: bool
+    episode_total_reward: float
+    epsilon: float
+    Q: np.ndarray
+    state_to_idx: dict[tuple[int, int], int]
+    is_episode_end: bool
 
 
 class QLearningAgent:
@@ -35,13 +60,19 @@ class QLearningAgent:
             return Action(int(self._rng.integers(0, 4)))
         return Action(int(np.argmax(Q[s_idx])))
 
-    def train(
+    def train_stream(
         self,
         env: GridWorld,
         *,
         num_episodes: int = 1000,
         max_steps: int = 200,
-    ) -> tuple[np.ndarray, QLearningMetrics, dict[tuple[int, int], int]]:
+    ) -> Iterator[StepEvent]:
+        """Yield one `StepEvent` per environment step.
+
+        Consuming this fully is equivalent to calling `.train()`: Q, metrics,
+        and state_to_idx are mutated in place and can be read from the last
+        event (or cached externally since Q is the same ndarray every step).
+        """
         states = list(env.states())
         state_to_idx = {s: i for i, s in enumerate(states)}
         Q = np.zeros((len(states), 4), dtype=float)
@@ -50,12 +81,12 @@ class QLearningAgent:
         episode_steps: list[int] = []
         epsilons: list[float] = []
 
-        for _ in range(num_episodes):
+        for ep in range(num_episodes):
             s = env.reset()
             total = 0.0
             steps = 0
 
-            for _t in range(max_steps):
+            for t in range(max_steps):
                 if env.is_terminal(s):
                     break
 
@@ -69,6 +100,22 @@ class QLearningAgent:
                 td_target = float(r) + self.gamma * float(np.max(Q[s2_idx]))
                 Q[s_idx, int(a)] += self.alpha * (td_target - Q[s_idx, int(a)])
 
+                is_episode_end = bool(done) or (t == max_steps - 1)
+                yield StepEvent(
+                    episode=ep,
+                    step=steps,
+                    state=s,
+                    action=a,
+                    next_state=s2,
+                    reward=float(r),
+                    done=bool(done),
+                    episode_total_reward=total,
+                    epsilon=self.epsilon,
+                    Q=Q,
+                    state_to_idx=state_to_idx,
+                    is_episode_end=is_episode_end,
+                )
+
                 s = s2
                 if done:
                     break
@@ -78,7 +125,24 @@ class QLearningAgent:
             epsilons.append(self.epsilon)
             self.epsilon = max(self.epsilon_min, self.epsilon * self.epsilon_decay)
 
-        return Q, QLearningMetrics(episode_rewards, episode_steps, epsilons), state_to_idx
+        self._last_Q = Q
+        self._last_metrics = QLearningMetrics(episode_rewards, episode_steps, epsilons)
+        self._last_state_to_idx = state_to_idx
+
+    def train(
+        self,
+        env: GridWorld,
+        *,
+        num_episodes: int = 1000,
+        max_steps: int = 200,
+    ) -> tuple[np.ndarray, QLearningMetrics, dict[tuple[int, int], int]]:
+        """Consume `train_stream` to completion and return final Q, metrics, and idx map.
+
+        Behavior is byte-identical to the previous implementation given the same seed.
+        """
+        for _ in self.train_stream(env, num_episodes=num_episodes, max_steps=max_steps):
+            pass
+        return self._last_Q, self._last_metrics, self._last_state_to_idx
 
     def evaluate_greedy(
         self,
@@ -110,4 +174,3 @@ class QLearningAgent:
     @staticmethod
     def get_value_function(Q: np.ndarray, idx_to_state: list[tuple[int, int]]) -> dict[tuple[int, int], float]:
         return {s: float(np.max(Q[i])) for i, s in enumerate(idx_to_state)}
-
