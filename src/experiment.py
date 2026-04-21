@@ -2,9 +2,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from .environment import GridWorld
 from .q_learning import QLearningAgent
+from .run_dir import write_config, write_metrics
 from .value_iteration import ValueIterationSolver
 from .visualization import (
     plot_comparison,
@@ -30,8 +32,22 @@ class ExperimentConfig:
 
 
 class ExperimentRunner:
-    def __init__(self, *, output_dir: Path) -> None:
-        self.output_dir = output_dir
+    """Orchestrates VI + Q-learning experiments into a structured run directory.
+
+    Expected layout (created by `run_dir.create_run_dir`):
+        <run_dir>/
+            vi/
+            ql/
+            comparisons/
+    """
+
+    def __init__(self, *, run_dir: Path) -> None:
+        self.run_dir = Path(run_dir)
+        self.vi_dir = self.run_dir / "vi"
+        self.ql_dir = self.run_dir / "ql"
+        self.cmp_dir = self.run_dir / "comparisons"
+        for d in (self.vi_dir, self.ql_dir, self.cmp_dir):
+            d.mkdir(parents=True, exist_ok=True)
 
     def run_all(
         self,
@@ -39,26 +55,23 @@ class ExperimentRunner:
         *,
         config: ExperimentConfig = ExperimentConfig(),
         seed: int | None = None,
+        env_meta: dict[str, Any] | None = None,
     ) -> None:
-        self.output_dir.mkdir(parents=True, exist_ok=True)
-
         # 1) Value Iteration
-        vi_env = env  # VI uses model access
-        vi = ValueIterationSolver(vi_env, gamma=config.gamma, theta=config.theta)
+        vi = ValueIterationSolver(env, gamma=config.gamma, theta=config.theta)
         vi_res = vi.solve()
 
-        plot_value_map(vi_res.V, env, save_path=self.output_dir / "vi_value_map.png")
-        plot_policy(vi_res.policy, env, save_path=self.output_dir / "vi_policy.png")
-        plot_convergence(vi_res.deltas, save_path=self.output_dir / "vi_convergence.png")
+        plot_value_map(vi_res.V, env, save_path=self.vi_dir / "value_map.png")
+        plot_policy(vi_res.policy, env, save_path=self.vi_dir / "policy.png")
+        plot_convergence(vi_res.deltas, save_path=self.vi_dir / "convergence.png")
         vi_traj, vi_return = vi.evaluate_policy(vi_res.policy, max_steps=config.max_steps)
         plot_trajectory(
             vi_traj,
             env,
             title=f"VI trajectory (return={vi_return:.3f})",
-            save_path=self.output_dir / "vi_trajectory.png",
+            save_path=self.vi_dir / "trajectory.png",
         )
 
-        # Convert VI eval into a reward curve for visual comparison (repeat rollouts).
         vi_rollout_rewards: list[float] = []
         for _ in range(min(200, config.episodes)):
             _traj, ret = vi.evaluate_policy(vi_res.policy, max_steps=config.max_steps)
@@ -79,20 +92,20 @@ class ExperimentRunner:
         q_policy = q_agent.get_policy(Q, idx_to_state)
         q_traj, q_return = q_agent.evaluate_greedy(env, Q, state_to_idx, max_steps=config.max_steps)
 
-        plot_value_map(q_V, env, title="Q-learning V(s)=max_a Q(s,a)", save_path=self.output_dir / "ql_value_map.png")
-        plot_policy(q_policy, env, title="Q-learning greedy policy", save_path=self.output_dir / "ql_policy.png")
+        plot_value_map(q_V, env, title="Q-learning V(s)=max_a Q(s,a)", save_path=self.ql_dir / "value_map.png")
+        plot_policy(q_policy, env, title="Q-learning greedy policy", save_path=self.ql_dir / "policy.png")
         plot_trajectory(
             q_traj,
             env,
             title=f"Q-learning greedy trajectory (return={q_return:.3f})",
-            save_path=self.output_dir / "ql_trajectory.png",
+            save_path=self.ql_dir / "trajectory.png",
         )
-        plot_learning_curve(metrics.episode_rewards, save_path=self.output_dir / "ql_learning_curve.png")
+        plot_learning_curve(metrics.episode_rewards, save_path=self.ql_dir / "learning_curve.png")
 
         plot_comparison(
             vi_rollout_rewards,
             metrics.episode_rewards[: len(vi_rollout_rewards)],
-            save_path=self.output_dir / "vi_vs_ql_rewards.png",
+            save_path=self.cmp_dir / "vi_vs_ql_rewards.png",
         )
 
         # 3) Gamma comparison (Q-learning)
@@ -113,7 +126,7 @@ class ExperimentRunner:
         plot_multi_curve(
             gamma_rewards,
             title="Q-learning: gamma comparison",
-            save_path=self.output_dir / "ql_gamma_comparison.png",
+            save_path=self.cmp_dir / "gamma_comparison.png",
         )
 
         # 4) Exploration comparison (epsilon settings)
@@ -138,5 +151,34 @@ class ExperimentRunner:
         plot_multi_curve(
             exploration_rewards,
             title="Q-learning: exploration comparison",
-            save_path=self.output_dir / "ql_exploration_comparison.png",
+            save_path=self.cmp_dir / "exploration_comparison.png",
+        )
+
+        # 5) Serialize config + metrics for reproducibility.
+        write_config(
+            self.run_dir,
+            config,
+            extra={
+                "seed": seed,
+                "env": env_meta or {},
+            },
+        )
+        write_metrics(
+            self.run_dir,
+            {
+                "vi": {
+                    "final_return": vi_return,
+                    "deltas": vi_res.deltas,
+                    "rollout_rewards": vi_rollout_rewards,
+                    "iterations": len(vi_res.deltas),
+                },
+                "ql": {
+                    "final_return": q_return,
+                    "episode_rewards": metrics.episode_rewards,
+                    "episode_steps": metrics.episode_steps,
+                    "epsilons": metrics.epsilons,
+                },
+                "gamma_comparison": {str(k): v for k, v in gamma_rewards.items()},
+                "exploration_comparison": exploration_rewards,
+            },
         )
