@@ -1,0 +1,173 @@
+\documentclass[a4paper,11pt]{article}
+
+% Pacotes básicos
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[brazil]{babel}
+\usepackage{geometry}
+\usepackage{setspace}
+\usepackage{titlesec}
+\usepackage{amsmath, amssymb, amsfonts}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{graphicx}
+\usepackage{float}
+\usepackage[hidelinks]{hyperref}
+
+\geometry{top=1.0cm, bottom=1.8cm, left=1.8cm, right=1.8cm}
+\onehalfspacing
+
+% Título
+\title{\textbf{Relatório T1} \\ \large MC906}
+\author{
+    Adriano Ribeiro Franulovic Campos,
+    Andrei Quaresma Pinto,
+    Matheus Ferracciú Scatolin,\\
+    Pietro Fernandes Magaldi,
+    Tiago Perrupato Antunes
+}
+\date{}
+
+\begin{document}
+
+\maketitle
+
+\section{Modelagem do problema}
+
+O ambiente foi implementado como um MDP em grade. A malha padrão possui dimensão $5\times5$ e as células usam a codificação:
+\begin{itemize}
+    \item \texttt{S}: estado inicial,
+    \item \texttt{G}: objetivo terminal,
+    \item \texttt{T}: armadilha terminal,
+    \item \texttt{\#}: parede (estado bloqueado),
+    \item \texttt{.}: estado livre.
+\end{itemize}
+
+No layout padrão, existem 25 posições na grade e 5 paredes, portanto o conjunto de estados utilizáveis tem cardinalidade $|S|=20$. Os estados terminais são dois (\texttt{G} e \texttt{T}). Na UI também foram disponibilizados layouts maiores (\texttt{OPEN 7x7}, \texttt{MAZE 9x9} e \texttt{GAUNTLET 6x10}), preservando a mesma semântica de células e recompensas.
+
+\textbf{Estados ($S$).} Cada estado é um par de coordenadas $s=(r,c)$ para toda célula não bloqueada.
+
+\textbf{Ações ($A$).} O conjunto de ações é discreto e fixo:
+\[
+A=\{\text{UP},\text{DOWN},\text{LEFT},\text{RIGHT}\}.
+\]
+
+\textbf{Dinâmica ($T$).} A função de transição é fornecida por:
+\begin{itemize}
+    \item modo determinístico (padrão): probabilidade 1 para o movimento escolhido;
+    \item modo estocástico: a ação desejada ocorre com probabilidade \texttt{wind\_prob} (padrão 0.8), e as duas ações perpendiculares dividem igualmente a massa restante.
+\end{itemize}
+
+Se a movimentação sair da grade ou bater em parede, o agente permanece no mesmo estado. Em estados terminais, a transição é absorvente (retorna ao próprio estado com probabilidade 1 e recompensa imediata 0).
+
+\textbf{Recompensas e utilidade ($U$).} A recompensa imediata é definida por:
+\[
+R(s,a,s')=
+\begin{cases}
++1.0, & s'\in G \\
+-1.0, & s'\in T \\
+-0.04, & \text{caso contrário}
+\end{cases}
+\]
+
+O termo de utilidade de longo prazo é o retorno descontado esperado:
+\[
+U(s)=\mathbb{E}\left[\sum_{k=0}^{\infty}\gamma^k r_{t+k+1}\mid s_t=s\right].
+\]
+
+A penalidade por passo ($-0.04$) força uma política que evita trajetórias longas e ajuda a diferenciar caminhos de mesmo destino.
+
+\section{Equações de Bellman}
+
+Foi implementada Value Iteration com atualização síncrona. Para cada estado não terminal, calcula-se:
+\[
+V_{k+1}(s)=\max_{a\in A}\sum_{s'} T(s,a,s')\left[R(s,a,s')+\gamma V_k(s')\right].
+\]
+
+Na implementação, para cada ação é computado um valor intermediário
+\[
+Q_k(s,a)=\sum_{s'} T(s,a,s')\left[R(s,a,s')+\gamma V_k(s')\right],
+\]
+e depois selecionado o máximo em relação a $a$. Para estados terminais, o código fixa $V(s)=0$ (a recompensa de atingir terminal já foi contabilizada na transição anterior).
+
+\textbf{Critério de convergência.} Em cada iteração:
+\[
+\Delta_k=\max_{s\in S}|V_{k+1}(s)-V_k(s)|.
+\]
+O algoritmo para quando $\Delta_k<\theta$ (padrão $\theta=10^{-6}$) ou ao atingir \texttt{max\_iterations} (100000).
+
+\textbf{Extração de política.} Após convergir, a política gulosa é extraída por:
+\[
+\pi^*(s)=\arg\max_{a\in A}\sum_{s'} T(s,a,s')\left[R(s,a,s')+\gamma V(s')\right].
+\]
+
+\section{Q-learning}
+
+Foi utilizado Q-learning com aprendizado tabular. A tabela é inicializada como:
+\[
+Q(s,a)=0\quad \forall (s,a),
+\]
+com dimensão $(|S|,4)$, onde as quatro colunas correspondem às ações.
+
+\subsection*{Regra de atualização}
+
+Para cada transição $(s,a,r,s')$, aplica-se:
+\[
+Q(s,a)\leftarrow Q(s,a)+\alpha\Big(r+\gamma\max_{a'}Q(s',a')-Q(s,a)\Big).
+\]
+
+O episódio inicia em \texttt{S}, termina ao atingir estado terminal ou \texttt{max\_steps} (padrão 200), e registra retorno acumulado e número de passos.
+
+\subsection*{Exploração adotada}
+
+A política de comportamento é $\varepsilon$-gulosa:
+\begin{itemize}
+    \item com probabilidade $\varepsilon$, escolhe ação aleatória uniforme;
+    \item caso contrário, escolhe $\arg\max_a Q(s,a)$.
+\end{itemize}
+
+Ao final de cada episódio:
+\[
+\varepsilon\leftarrow\max(\varepsilon_{\min},\varepsilon\cdot \text{decay}).
+\]
+
+Valores padrão do experimento base: $\alpha=0.1$, $\gamma=0.99$, $\varepsilon_0=1.0$, \texttt{decay}=0.995 e $\varepsilon_{\min}=0.05$.
+
+Na interface interativa, o treinamento de Q-learning usa por padrão 500 episódios e exibe no HUD o progresso por episódio, retorno acumulado, número de passos, valor de $\varepsilon$ e velocidade de simulação.
+
+\subsection*{Impacto esperado dos parâmetros}
+
+\begin{itemize}
+    \item $\alpha$ controla velocidade de adaptação: maior $\alpha$ aprende rápido, porém com maior variância; menor $\alpha$ estabiliza, mas torna o processo lento.
+    \item $\gamma$ controla horizonte: valores altos favorecem retornos futuros e tendem a políticas de longo prazo; valores baixos privilegiam ganho imediato.
+    \item $\varepsilon$ e \texttt{decay} regulam exploração/explotação: muita exploração reduz risco de ótimo local, mas piora retorno inicial; pouca exploração acelera desempenho inicial, porém pode cristalizar política subótima.
+\end{itemize}
+
+\section{Visualização}
+
+Além dos plots estáticos, foi implementada uma UI arcade que permite acompanhar o treinamento em tempo real e inspecionar qualitativamente a política aprendida.
+
+Na tela de menu, é possível configurar diferentes experimentos combinando: (i) algoritmo (\textit{Q-learning} ou \textit{Value Iteration}), (ii) mapa (\texttt{DEFAULT 5x5}, \texttt{OPEN 7x7}, \texttt{MAZE 9x9}, \texttt{GAUNTLET 6x10}) e (iii) vento estocástico ligado/desligado. Durante a execução, a UI oferece controles de pausa, passo-a-passo e velocidade, além de sobreposições de valor ($V$), política ($P$) e mapa de visitas ($H$). Ao final, é possível reproduzir a trajetória gulosa e gravar GIFs para documentação dos resultados.
+
+\section{Avaliação Experimental e Discussão}
+
+Os principais experimentos e plots foram realizados com um grid fixo, representado na Imagem \ref{grid}. Em verde, está a posição inicial do agente, em preto estão as paredes do ambiente, em verde está o objetivo e em vermelho está o estado terminal.
+
+\begin{figure}
+    \centering
+    \includegraphics[width=0.4\linewidth]{grid_customizado_5x5.png}
+    \caption{Grid utilizado para experimentos.}
+    \label{grid}
+\end{figure}
+
+Os experimentos realizados avaliaram o desempenho e a convergência dos algoritmos \textit{Value Iteration} (VI) e \textit{Q-learning} no ambiente \textit{GridWorld} proposto. A análise conjunta dos resultados revela grande consistência entre a abordagem \emph{model-based} e a \emph{model-free}, com ambas alcançando uma política de alta qualidade, mas exibindo dinâmicas de aprendizado e \textit{trade-offs} distintos ao longo do processo. A UI foi usada como apoio para validação qualitativa das trajetórias e da evolução das políticas em diferentes mapas.
+
+\textbf{Convergência e Estabilidade.} O algoritmo \textit{Value Iteration} apresentou uma convergência notavelmente rápida e com decréscimo monotônico do erro (observável pela curva de $\max|\Delta V|$), estabilizando completamente em cerca de 10 iterações. Esse comportamento é esperado, dado que o algoritmo possui acesso explícito e integral às funções de transição e recompensa do modelo, além de operar sobre um espaço de estados de dimensionalidade reduzida. Em contrapartida, a curva de aprendizado do \textit{Q-learning} reflete sua natureza amostral e exploratória. Durante os episódios iniciais, o algoritmo registra alta variância e retornos fortemente negativos (com quedas próximas a $-8$), decorrentes das frequentes visitas à armadilha geradas pela exploração aleatória. No entanto, o aprendizado demonstra-se eficaz: após uma fase transitória que varia entre 100 e 250 episódios, o retorno estabiliza-se em um patamar positivo constante, equiparando-se ao ótimo obtido analiticamente pelo VI.
+
+\textbf{Mapas de Valor e Políticas Ótimas.} Ao final do treinamento, tanto o planejamento do VI quanto o aprendizado do \textit{Q-learning} produziram trajetórias gulosas idênticas. Ambos os agentes aprendem a se deslocar do estado inicial até o objetivo de forma ótima (alcançando o retorno de $0.760$), contornando os obstáculos e mantendo uma distância segura da armadilha. A análise dos mapas espaciais da função de valor ($V(s)$) confirma esse entendimento estratégico: há um claro gradiente crescente de utilidade direcionado à rota do objetivo (\texttt{G}), enquanto os estados adjacentes à armadilha (\texttt{T}) ou de trânsito custoso recebem valorações inferiores. Essa paridade espacial nos mapas de valor valida que o \textit{Q-learning} obteve uma representação interna do ambiente muito próxima daquela computada exaustivamente pelo VI.
+
+\textbf{Impacto dos Hiperparâmetros.} A variação na estratégia de exploração do \textit{Q-learning} elucida o clássico dilema \textit{exploration vs. exploitation}. Configurações com alta taxa de exploração inicial (como $\varepsilon = 1.0$) garantem uma varredura abrangente do espaço de estados, reduzindo o risco de o agente cristalizar prematuramente uma política subótima (miopia estratégica). O custo inerente dessa abordagem é um pior desempenho inicial, evidenciado pelas frequentes quedas na recompensa. Em contrapartida, variações no fator de desconto $\gamma$ (0.5, 0.9 e 0.99) demonstraram impactar primordialmente a velocidade com que o algoritmo cruza a fase transitória de estabilização, embora, neste ambiente específico, todas as configurações testadas tenham convergido para patamares de retorno médio muito semelhantes ao final dos 1000 episódios.
+
+\textbf{Trade-offs e Limitações.} Os resultados materializam os principais \textit{trade-offs} da literatura: métodos \emph{model-based} oferecem estabilidade e rapidez algorítmica, porém ao custo restritivo de exigir um modelo perfeito (\textit{prior knowledge}) do domínio. Métodos \emph{model-free}, por dispensarem essa premissa, operam com maior flexibilidade, mas demandam um custo amostral significativamente mais alto no início da execução. Cabe ressaltar que as conclusões atuais estão atreladas a um ambiente de dimensões reduzidas e não estocástico em sua forma base. O experimento carece de intervalos de confiança computados a partir de múltiplas sementes aleatórias. Para desdobramentos futuros, recomenda-se a ativação da probabilidade de transição estocástica (vento) e a agregação estatística dos episódios para avaliar a robustez das políticas aprendidas sob incerteza.
+
+\end{document}
