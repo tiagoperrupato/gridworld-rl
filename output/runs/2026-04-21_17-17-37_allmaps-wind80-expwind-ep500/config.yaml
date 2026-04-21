@@ -1,0 +1,29 @@
+config:
+  gamma: 0.99
+  theta: 1.0e-06
+  episodes: 500
+  max_steps: 200
+  alpha: 0.1
+  epsilon: 1.0
+  epsilon_decay: 0.995
+  epsilon_min: 0.05
+seed: null
+seeds:
+- 0
+- 1
+- 2
+- 3
+- 4
+maps:
+- default_5x5
+- open_7x7
+- maze_9x9
+- gauntlet_6x10
+map_names:
+- DEFAULT 5x5
+- OPEN 7x7
+- MAZE 9x9
+- GAUNTLET 6x10
+stochastic: true
+wind_prob: 0.8
+compare_wind_exploration: true

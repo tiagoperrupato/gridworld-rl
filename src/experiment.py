@@ -95,6 +95,19 @@ class ExperimentRunner:
             seed=seed,
         )
 
+    @staticmethod
+    def _env_with_stochasticity(env: GridWorld, *, stochastic: bool) -> GridWorld:
+        """Same MDP parameters as ``env`` but with a chosen wind (stochastic) mode."""
+        return GridWorld(
+            grid=env.grid.copy(),
+            stochastic=stochastic,
+            wind_prob=env.wind_prob,
+            step_cost=env.step_cost,
+            goal_reward=env.goal_reward,
+            trap_reward=env.trap_reward,
+            seed=None,
+        )
+
     def _train_qlearning(
         self,
         template: GridWorld,
@@ -155,12 +168,17 @@ class ExperimentRunner:
         seeds: list[int] | None = None,
         env_meta: dict[str, Any] | None = None,
         map_subdir: str = "default",
+        compare_exploration_wind: bool = False,
     ) -> dict[str, Any]:
         """Run the full pipeline for one map and return its metrics dict.
 
         All artifacts are written under `<run_dir>/<map_subdir>/`. The caller
         is responsible for stitching multiple per-map dicts together into the
         top-level `metrics.json`.
+
+        When ``compare_exploration_wind`` is True, each exploration strategy is
+        trained under both deterministic dynamics and stochastic wind (same
+        grid and ``wind_prob``), producing ``comparisons/exploration_det_vs_wind.png``.
         """
         # `seed` is kept for backwards compatibility (single-seed behavior).
         # `seeds` overrides it and is the preferred entry point.
@@ -310,22 +328,45 @@ class ExperimentRunner:
                 {**baseline_kwargs, "epsilon": 1.0, "epsilon_decay": 0.995, "epsilon_min": 0.05, "strategy": "softmax"},
             ),
         ]
-        strategy_runs: dict[str, list[_QLRun]] = {label: [] for label, _ in strategy_specs}
-        for label, kwargs in strategy_specs:
-            for s in seeds_list:
-                strategy_runs[label].append(
-                    self._train_qlearning(
-                        env,
-                        seed=s,
-                        num_episodes=config.episodes,
-                        max_steps=config.max_steps,
-                        agent_kwargs=kwargs,
+
+        def _run_strategy_sweep(template: GridWorld) -> dict[str, dict[str, np.ndarray]]:
+            runs_map: dict[str, list[_QLRun]] = {label: [] for label, _ in strategy_specs}
+            for label, kwargs in strategy_specs:
+                for s in seeds_list:
+                    runs_map[label].append(
+                        self._train_qlearning(
+                            template,
+                            seed=s,
+                            num_episodes=config.episodes,
+                            max_steps=config.max_steps,
+                            agent_kwargs=kwargs,
+                        )
                     )
-                )
-        strategy_bands = {
-            label: aggregate_curves([r.episode_rewards for r in runs])
-            for label, runs in strategy_runs.items()
-        }
+            return {label: aggregate_curves([r.episode_rewards for r in runs]) for label, runs in runs_map.items()}
+
+        exploration_det_vs_wind_bands: dict[str, dict[str, np.ndarray]] | None = None
+        if compare_exploration_wind:
+            det_template = self._env_with_stochasticity(env, stochastic=False)
+            wind_template = self._env_with_stochasticity(env, stochastic=True)
+            strategy_bands_det = _run_strategy_sweep(det_template)
+            strategy_bands_wind = _run_strategy_sweep(wind_template)
+            strategy_bands = strategy_bands_wind if env.stochastic else strategy_bands_det
+            exploration_det_vs_wind_bands = dict[str, dict[str, np.ndarray]]()
+            for label in strategy_bands_det:
+                exploration_det_vs_wind_bands[f"{label} (no wind)"] = strategy_bands_det[label]
+                exploration_det_vs_wind_bands[f"{label} (stochastic wind)"] = strategy_bands_wind[label]
+            plot_multi_curve_bands(
+                exploration_det_vs_wind_bands,
+                title=(
+                    "Q-learning: exploration strategies — deterministic vs stochastic wind "
+                    f"(p_intended={env.wind_prob:.2f}, mean ± std over seeds)"
+                ),
+                save_path=cmp_dir / "exploration_det_vs_wind.png",
+                figsize=(10, 5),
+            )
+        else:
+            strategy_bands = _run_strategy_sweep(env)
+
         plot_multi_curve_bands(
             strategy_bands,
             title="Q-learning: exploration strategies (mean ± std over seeds)",
@@ -407,7 +448,7 @@ class ExperimentRunner:
                 for label, series in bands.items()
             }
 
-        return {
+        metrics_result: dict[str, Any] = {
             "map_subdir": map_subdir,
             "env": env_meta or {},
             "seeds": seeds_list,
@@ -436,6 +477,9 @@ class ExperimentRunner:
             "convergence_and_stability": convergence_summary,
             "visit_counts_sum": visits_sum.tolist(),
         }
+        if exploration_det_vs_wind_bands is not None:
+            metrics_result["exploration_det_vs_wind"] = _bands_to_json(exploration_det_vs_wind_bands)
+        return metrics_result
 
 
 def summarize_across_maps(per_map_metrics: dict[str, dict[str, Any]]) -> dict[str, Any]:

@@ -12,6 +12,14 @@ def build_arg_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description="Gridworld RL: Value Iteration and Q-learning")
     p.add_argument("--stochastic", action="store_true", help="Enable stochastic wind transitions")
     p.add_argument("--wind-prob", type=float, default=0.8, help="Probability of intended action under wind")
+    p.add_argument(
+        "--compare-wind-exploration",
+        action="store_true",
+        help=(
+            "Run each exploration-strategy sweep twice (deterministic vs stochastic wind) and write "
+            "comparisons/<map>/exploration_det_vs_wind.png plus metrics under exploration_det_vs_wind"
+        ),
+    )
     p.add_argument("--gamma", type=float, default=0.99, help="Discount factor")
     p.add_argument("--theta", type=float, default=1e-6, help="Value Iteration convergence threshold")
     p.add_argument("--episodes", type=int, default=1000, help="Q-learning training episodes")
@@ -123,6 +131,7 @@ def main() -> None:
             seeds=seeds_list,
             env_meta=env_meta,
             map_subdir=mc.slug,
+            compare_exploration_wind=args.compare_wind_exploration,
         )
 
     write_config(
@@ -135,6 +144,7 @@ def main() -> None:
             "map_names": [m.name for m in selected_maps],
             "stochastic": args.stochastic,
             "wind_prob": args.wind_prob,
+            "compare_wind_exploration": args.compare_wind_exploration,
         },
     )
     write_metrics(

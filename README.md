@@ -136,6 +136,7 @@ Each run of `main_ui.py` creates a fresh `output/runs/<timestamp>_ui/` directory
 ./.venv/bin/python main.py                                    # full pipeline
 ./.venv/bin/python main.py --episodes 200 --seed 0             # quick sanity
 ./.venv/bin/python main.py --stochastic --run-name windy       # stochastic world
+./.venv/bin/python main.py --compare-wind-exploration --run-name exp-wind  # det vs wind per exploration strategy
 ./.venv/bin/python main.py --gamma 0.9 --run-name low-gamma    # sweep tag
 ```
 
@@ -146,11 +147,20 @@ This runs:
 - Gamma comparison and exploration comparison sweeps
 - Saves plots, `config.yaml`, and `metrics.json` into a new run dir
 
+### Streamlit UI
+
+Prefer clicking to typing? A Streamlit wrapper around `main.py` lets you pick params, preview the exact CLI command (with a smart auto-generated `--run-name`), stream the run live, and browse the generated figures — all in the browser:
+
+```bash
+./.venv/bin/python -m streamlit run app_streamlit.py
+```
+
 ### CLI options
 
 Run `--help` for the full list. Main options:
 
 - `--stochastic`, `--wind-prob`
+- `--compare-wind-exploration` (writes `exploration_det_vs_wind.png` + `exploration_det_vs_wind` in `metrics.json`)
 - `--gamma`, `--theta`
 - `--episodes`, `--max-steps`, `--alpha`
 - `--epsilon`, `--epsilon-decay`, `--epsilon-min`
@@ -185,6 +195,7 @@ output/
         vi_vs_ql_rewards.png
         gamma_comparison.png
         exploration_comparison.png
+        exploration_det_vs_wind.png   # only if you pass --compare-wind-exploration
       episode.gif              # produced by the UI if run via main_ui.py
 ```
 

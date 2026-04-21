@@ -216,6 +216,7 @@ def plot_multi_curve_bands(
     ylabel: str = "Cumulative reward",
     save_path: Path | None = None,
     smooth: int = 20,
+    figsize: tuple[float, float] | None = None,
 ) -> None:
     """Plot mean line + std band for each series in `curves`.
 
@@ -224,7 +225,7 @@ def plot_multi_curve_bands(
     mean and std are trailing-averaged over a ``smooth``-episode window, which
     keeps multi-seed plots readable when individual returns are noisy.
     """
-    plt.figure(figsize=(7, 4))
+    plt.figure(figsize=figsize if figsize is not None else (7, 4))
     for label, series in curves.items():
         mean = np.asarray(series["mean"], dtype=float)
         std = np.asarray(series["std"], dtype=float)
