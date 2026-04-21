@@ -25,17 +25,17 @@ def create_run_dir(
 
     Layout:
         <output_root>/runs/<YYYY-MM-DD_HH-MM-SS>_<slug>/
-            vi/
-            ql/
-            comparisons/
+
+    Per-map subdirectories (`<map_slug>/vi/`, `<map_slug>/ql/`, ...) are
+    created on demand by `ExperimentRunner` so the structure scales naturally
+    when the same run sweeps over multiple maps.
     """
     output_root = Path(output_root)
     ts = (timestamp or datetime.now()).strftime("%Y-%m-%d_%H-%M-%S")
     name = f"{ts}_{_slugify(slug or 'default')}"
 
     run_dir = output_root / "runs" / name
-    for sub in ("vi", "ql", "comparisons"):
-        (run_dir / sub).mkdir(parents=True, exist_ok=True)
+    run_dir.mkdir(parents=True, exist_ok=True)
     return run_dir
 
 

@@ -18,11 +18,14 @@ from typing import Callable, Optional
 import numpy as np
 
 from ..environment import _ACTION_TO_DELTA, Action, Cell, GridWorld
+from ..maps import DEFAULT_MAPS, MapChoice
 from ..q_learning import QLearningAgent, StepEvent
 from ..value_iteration import ValueIterationSolver
 from . import assets
 from .gif_export import GifRecorder
 from .renderer import OverlayState, Renderer, compute_layout
+
+__all__ = ["DEFAULT_MAPS", "MapChoice"]
 
 BUMP_FRAMES = 6  # how many draws a wall-bump wiggle lasts
 
@@ -48,63 +51,6 @@ class TrainConfig:
     epsilon_decay: float = 0.995
     epsilon_min: float = 0.05
     seed: int | None = 0
-
-
-@dataclass
-class MapChoice:
-    name: str
-    layout: list[str]
-
-
-DEFAULT_MAPS: list[MapChoice] = [
-    MapChoice(
-        "DEFAULT 5x5",
-        [
-            "S...#",
-            ".#..T",
-            ".#.#.",
-            "..#..",
-            "...G.",
-        ],
-    ),
-    MapChoice(
-        "OPEN 7x7",
-        [
-            "S......",
-            ".##..T.",
-            ".......",
-            "..##...",
-            "...T...",
-            ".##....",
-            "......G",
-        ],
-    ),
-    MapChoice(
-        "MAZE 9x9",
-        [
-            "S........",
-            ".#######.",
-            ".#.....#.",
-            ".#.###.#.",
-            ".#.#G#.#.",
-            ".#.#.#.#.",
-            ".#...#.#.",
-            ".#####.#.",
-            "........T",
-        ],
-    ),
-    MapChoice(
-        "GAUNTLET 6x10",
-        [
-            "S.T..T....",
-            "..........",
-            ".####.####",
-            "..........",
-            "####.####.",
-            "....T....G",
-        ],
-    ),
-]
 
 
 @dataclass
