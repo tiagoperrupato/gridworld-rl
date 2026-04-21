@@ -47,15 +47,31 @@ class QLearningAgent:
         epsilon_decay: float = 0.995,
         epsilon_min: float = 0.05,
         seed: int | None = None,
+        strategy: str = "eps_greedy",
     ) -> None:
         self.alpha = float(alpha)
         self.gamma = float(gamma)
         self.epsilon = float(epsilon)
         self.epsilon_decay = float(epsilon_decay)
         self.epsilon_min = float(epsilon_min)
+        if strategy not in ("eps_greedy", "softmax"):
+            raise ValueError(f"unknown strategy: {strategy!r}")
+        self.strategy = strategy
         self._rng = np.random.default_rng(seed)
 
-    def _epsilon_greedy(self, Q: np.ndarray, s_idx: int) -> Action:
+    def _select_action(self, Q: np.ndarray, s_idx: int) -> Action:
+        if self.strategy == "softmax":
+            # `epsilon` is reinterpreted as temperature for softmax so we don't
+            # have to grow the constructor or metrics surface for one extra
+            # strategy. Clamp to a small positive floor to keep softmax well
+            # defined as the schedule decays toward zero.
+            temperature = max(self.epsilon, 1e-6)
+            logits = Q[s_idx] / temperature
+            logits = logits - float(np.max(logits))
+            probs = np.exp(logits)
+            probs /= probs.sum()
+            return Action(int(self._rng.choice(4, p=probs)))
+
         if float(self._rng.random()) < self.epsilon:
             return Action(int(self._rng.integers(0, 4)))
         return Action(int(np.argmax(Q[s_idx])))
@@ -91,7 +107,7 @@ class QLearningAgent:
                     break
 
                 s_idx = state_to_idx[s]
-                a = self._epsilon_greedy(Q, s_idx)
+                a = self._select_action(Q, s_idx)
                 s2, r, done = env.step(a)
                 total += float(r)
                 steps += 1
