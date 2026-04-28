@@ -8,7 +8,7 @@ from typing import Any
 import numpy as np
 
 from .environment import GridWorld
-from .q_learning import QLearningAgent
+from .q_learning import QLearningAgent, DoubleQLearningAgent, BaseQLearningAgent
 from .stats_tools import aggregate_curves, episodes_to_threshold, policy_agreement
 from .value_iteration import ValueIterationSolver
 from .visualization import (
@@ -62,6 +62,7 @@ class ExperimentRunner:
             <map_slug>/
                 vi/
                 ql/
+                dql/
                 comparisons/
                 analysis/
 
@@ -116,10 +117,11 @@ class ExperimentRunner:
         num_episodes: int,
         max_steps: int,
         agent_kwargs: dict[str, Any],
+        agent_class: type[BaseQLearningAgent] = QLearningAgent,
     ) -> _QLRun:
         """Run one Q-learning training pass and collect everything we analyze."""
         env = self._build_env(template, seed=seed)
-        agent = QLearningAgent(seed=seed, **agent_kwargs)
+        agent = agent_class(seed=seed, **agent_kwargs)
 
         visit_counts = np.zeros((env.h, env.w), dtype=np.int64)
         t0 = time.perf_counter()
@@ -192,9 +194,10 @@ class ExperimentRunner:
         map_dir = self.run_dir / map_subdir
         vi_dir = map_dir / "vi"
         ql_dir = map_dir / "ql"
+        dql_dir = map_dir / "dql"
         cmp_dir = map_dir / "comparisons"
         analysis_dir = map_dir / "analysis"
-        for d in (vi_dir, ql_dir, cmp_dir, analysis_dir):
+        for d in (vi_dir, ql_dir, dql_dir, cmp_dir, analysis_dir):
             d.mkdir(parents=True, exist_ok=True)
 
         # 1) Value Iteration (deterministic given env + gamma + theta, runs once).
@@ -230,9 +233,10 @@ class ExperimentRunner:
             vi_rollout_per_seed.append(seed_curve)
         vi_rollout_agg = aggregate_curves(vi_rollout_per_seed)
 
-        # 2) Baseline Q-learning across all seeds (used for the main learning
-        #    curve, VI-vs-QL comparison, convergence/stability metrics, and
+        # 2) Q-learning and Double Q-learning across all seeds (used for the main learning
+        #    curve, VI-vs-QL comparison, QL-vs-DQL, VI-vs-DQL, convergence/stability metrics, and
         #    the aggregated visit heatmap).
+        
         baseline_kwargs = dict(
             alpha=config.alpha,
             gamma=config.gamma,
@@ -240,43 +244,59 @@ class ExperimentRunner:
             epsilon_decay=config.epsilon_decay,
             epsilon_min=config.epsilon_min,
         )
-        baseline_runs: list[_QLRun] = []
-        for s in seeds_list:
-            baseline_runs.append(
-                self._train_qlearning(
-                    env,
-                    seed=s,
-                    num_episodes=config.episodes,
-                    max_steps=config.max_steps,
-                    agent_kwargs=baseline_kwargs,
+        
+        def _make_metrics(AgentClass: BaseQLearningAgent) -> dict[str, Any]:
+            baseline_runs: list[_QLRun] = []
+            for s in seeds_list:
+                baseline_runs.append(
+                    self._train_qlearning(
+                        env,
+                        seed=s,
+                        num_episodes=config.episodes,
+                        max_steps=config.max_steps,
+                        agent_kwargs=baseline_kwargs,
+                        agent_class=AgentClass,
+                    )
                 )
+            return baseline_runs, baseline_kwargs
+        
+        def _plot_artifacts(baseline_runs, env, dir, title) -> None:
+            illustrative = baseline_runs[0]
+            plot_value_map(
+                illustrative.value_fn,
+                env,
+                title=f"{title} V(s)=max_a Q(s,a)",
+                save_path=dir / "value_map.png",
             )
+            plot_policy(illustrative.policy, env, title=f"{title} greedy policy", save_path=dir / "policy.png")
+            plot_trajectory(
+                illustrative.greedy_trajectory,
+                env,
+                title=f"{title} greedy trajectory (return={illustrative.greedy_return:.3f})",
+                save_path=dir / "trajectory.png",
+            )
+            plot_learning_curve(illustrative.episode_rewards, save_path=dir / "learning_curve.png")
+            return illustrative
 
         # Use the first seed's run for the single-instance Q-learning artifacts
         # (value map, policy, trajectory, learning curve). These are illustrative
         # figures, not the statistical story — the comparisons plots carry that.
-        illustrative = baseline_runs[0]
-        plot_value_map(
-            illustrative.value_fn,
-            env,
-            title="Q-learning V(s)=max_a Q(s,a)",
-            save_path=ql_dir / "value_map.png",
-        )
-        plot_policy(illustrative.policy, env, title="Q-learning greedy policy", save_path=ql_dir / "policy.png")
-        plot_trajectory(
-            illustrative.greedy_trajectory,
-            env,
-            title=f"Q-learning greedy trajectory (return={illustrative.greedy_return:.3f})",
-            save_path=ql_dir / "trajectory.png",
-        )
-        plot_learning_curve(illustrative.episode_rewards, save_path=ql_dir / "learning_curve.png")
+
+        baseline_runs_q_learning, baseline_kwargs_ql = _make_metrics(QLearningAgent)
+        baseline_runs_double_q_learning, baseline_kwargs_dql = _make_metrics(DoubleQLearningAgent)
+
+        # QLearning artifacts.
+        illustrative_ql = _plot_artifacts(baseline_runs_q_learning, env, ql_dir, title="Q-learning")
+
+        # Double Q-learning artifacts.
+        illustrative_dql = _plot_artifacts(baseline_runs_double_q_learning, env, dql_dir, title="Double Q-learning")
 
         # VI vs Q-learning: mean ± std curves on the same axes.
-        baseline_agg = aggregate_curves([r.episode_rewards for r in baseline_runs])
+        baseline_agg_ql = aggregate_curves([r.episode_rewards for r in baseline_runs_q_learning])
         plot_multi_curve_bands(
             {
                 "Value Iteration (rollouts)": vi_rollout_agg,
-                "Q-learning (training)": baseline_agg,
+                "Q-learning (training)": baseline_agg_ql,
             },
             title="Bellman vs Q-learning (mean ± std over seeds)",
             ylabel="Return",
@@ -285,11 +305,53 @@ class ExperimentRunner:
         # Keep a single-seed overlay too: helps the eye when the bands overlap.
         plot_comparison(
             vi_rollout_per_seed[0],
-            illustrative.episode_rewards[: len(vi_rollout_per_seed[0])],
+            illustrative_ql.episode_rewards[: len(vi_rollout_per_seed[0])],
             save_path=cmp_dir / "vi_vs_ql_rewards_single_seed.png",
         )
 
+        # VI vs Double-Q-learning: mean ± std curves on the same axes.
+        baseline_agg_dql = aggregate_curves([r.episode_rewards for r in baseline_runs_double_q_learning])
+        plot_multi_curve_bands(
+            {
+                "Value Iteration (rollouts)": vi_rollout_agg,
+                "Double-Q-learning (training)": baseline_agg_dql,
+            },
+            title="Bellman vs Double-Q-learning (mean ± std over seeds)",
+            ylabel="Return",
+            save_path=cmp_dir / "vi_vs_dql_rewards.png",
+        )
+        # Keep a single-seed overlay too: helps the eye when the bands overlap.
+        plot_comparison(
+            vi_rollout_per_seed[0],
+            illustrative_dql.episode_rewards[: len(vi_rollout_per_seed[0])],
+            title="Bellman vs Double-Q-learning (single seed)",
+            label1="Value Iteration (single seed)",
+            label2="Double-Q-learning (single seed)",
+            save_path=cmp_dir / "vi_vs_dql_rewards_single_seed.png",
+        )
+        
+        # Q-learning vs Double-Q-learning: mean ± std curves on the same axes.
+        plot_multi_curve_bands(
+            {
+                "Q-learning": baseline_agg_ql,
+                "Double-Q-learning": baseline_agg_dql,
+            },
+            title="Q-learning vs Double-Q-learning (mean ± std over seeds)",
+            ylabel="Return",
+            save_path=cmp_dir / "ql_vs_dql_rewards.png",
+        )
+            # Keep a single-seed overlay too: helps the eye when the bands overlap.
+        plot_comparison(
+            illustrative_ql.episode_rewards,
+            illustrative_dql.episode_rewards,
+            title="Q-learning vs Double-Q-learning (single seed)",
+            label1="Q-learning (single seed)",
+            label2="Double-Q-learning (single seed)",
+            save_path=cmp_dir / "ql_vs_dql_rewards_single_seed.png",
+        )
+
         # 3) Gamma comparison — multi-seed.
+        # 3.1) Q-learning with different gammas.
         gammas = [0.5, 0.9, 0.99]
         gamma_runs: dict[float, list[_QLRun]] = {g: [] for g in gammas}
         for g in gammas:
@@ -300,7 +362,8 @@ class ExperimentRunner:
                         seed=s,
                         num_episodes=config.episodes,
                         max_steps=config.max_steps,
-                        agent_kwargs={**baseline_kwargs, "gamma": g},
+                        agent_kwargs={**baseline_kwargs_ql, "gamma": g},
+                        agent_class=QLearningAgent,
                     )
                 )
         gamma_bands = {
@@ -310,7 +373,31 @@ class ExperimentRunner:
         plot_multi_curve_bands(
             gamma_bands,
             title="Q-learning: gamma comparison (mean ± std over seeds)",
-            save_path=cmp_dir / "gamma_comparison.png",
+            save_path=cmp_dir / "gamma_comparison_ql.png",
+        )
+
+        # 3.2) Double Q-learning with different gammas.
+        gamma_runs_dql: dict[float, list[_QLRun]] = {g: [] for g in gammas}
+        for g in gammas:
+            for s in seeds_list:
+                gamma_runs_dql[g].append(
+                    self._train_qlearning(
+                        env,
+                        seed=s,
+                        num_episodes=config.episodes,
+                        max_steps=config.max_steps,
+                        agent_kwargs={**baseline_kwargs_dql, "gamma": g},
+                        agent_class=DoubleQLearningAgent,
+                    )
+                )
+        gamma_bands_dql = {
+            f"γ={g}": aggregate_curves([r.episode_rewards for r in runs])
+            for g, runs in gamma_runs_dql.items()
+        }
+        plot_multi_curve_bands(
+            gamma_bands_dql,
+            title="Double Q-learning: gamma comparison (mean ± std over seeds)",
+            save_path=cmp_dir / "gamma_comparison_dql.png",
         )
 
         # 4) Exploration strategies — three genuinely different strategies.
@@ -329,7 +416,7 @@ class ExperimentRunner:
             ),
         ]
 
-        def _run_strategy_sweep(template: GridWorld) -> dict[str, dict[str, np.ndarray]]:
+        def _run_strategy_sweep(template: GridWorld, agent_class: type[BaseQLearningAgent]) -> dict[str, dict[str, np.ndarray]]:
             runs_map: dict[str, list[_QLRun]] = {label: [] for label, _ in strategy_specs}
             for label, kwargs in strategy_specs:
                 for s in seeds_list:
@@ -340,50 +427,73 @@ class ExperimentRunner:
                             num_episodes=config.episodes,
                             max_steps=config.max_steps,
                             agent_kwargs=kwargs,
+                            agent_class=agent_class,
                         )
                     )
             return {label: aggregate_curves([r.episode_rewards for r in runs]) for label, runs in runs_map.items()}
 
-        exploration_det_vs_wind_bands: dict[str, dict[str, np.ndarray]] | None = None
+        exploration_det_vs_wind_bands_ql: dict[str, dict[str, np.ndarray]] | None = None
+        exploration_det_vs_wind_bands_dql: dict[str, dict[str, np.ndarray]] | None = None
         if compare_exploration_wind:
             det_template = self._env_with_stochasticity(env, stochastic=False)
             wind_template = self._env_with_stochasticity(env, stochastic=True)
-            strategy_bands_det = _run_strategy_sweep(det_template)
-            strategy_bands_wind = _run_strategy_sweep(wind_template)
-            strategy_bands = strategy_bands_wind if env.stochastic else strategy_bands_det
-            exploration_det_vs_wind_bands = dict[str, dict[str, np.ndarray]]()
-            for label in strategy_bands_det:
-                exploration_det_vs_wind_bands[f"{label} (no wind)"] = strategy_bands_det[label]
-                exploration_det_vs_wind_bands[f"{label} (stochastic wind)"] = strategy_bands_wind[label]
+            strategy_bands_det_ql = _run_strategy_sweep(det_template, QLearningAgent)
+            strategy_bands_wind_ql = _run_strategy_sweep(wind_template, QLearningAgent)
+            strategy_bands_det_dql = _run_strategy_sweep(det_template, DoubleQLearningAgent)
+            strategy_bands_wind_dql = _run_strategy_sweep(wind_template, DoubleQLearningAgent)
+            strategy_bands_ql = strategy_bands_wind_ql if env.stochastic else strategy_bands_det_ql
+            strategy_bands_dql = strategy_bands_wind_dql if env.stochastic else strategy_bands_det_dql
+            exploration_det_vs_wind_bands_ql = dict[str, dict[str, np.ndarray]]()
+            exploration_det_vs_wind_bands_dql = dict[str, dict[str, np.ndarray]]()
+            for label in strategy_bands_det_ql:
+                exploration_det_vs_wind_bands_ql[f"{label} (no wind)"] = strategy_bands_det_ql[label]
+                exploration_det_vs_wind_bands_ql[f"{label} (stochastic wind)"] = strategy_bands_wind_ql[label]
+                exploration_det_vs_wind_bands_dql[f"{label} (no wind)"] = strategy_bands_det_dql[label]
+                exploration_det_vs_wind_bands_dql[f"{label} (stochastic wind)"] = strategy_bands_wind_dql[label]
             plot_multi_curve_bands(
-                exploration_det_vs_wind_bands,
+                exploration_det_vs_wind_bands_ql,
                 title=(
                     "Q-learning: exploration strategies — deterministic vs stochastic wind "
                     f"(p_intended={env.wind_prob:.2f}, mean ± std over seeds)"
                 ),
-                save_path=cmp_dir / "exploration_det_vs_wind.png",
+                save_path=cmp_dir / "exploration_det_vs_wind_ql.png",
+                figsize=(10, 5),
+            )
+            plot_multi_curve_bands(
+                exploration_det_vs_wind_bands_dql,
+                title=(
+                    "Double Q-learning: exploration strategies — deterministic vs stochastic wind "
+                    f"(p_intended={env.wind_prob:.2f}, mean ± std over seeds)"
+                ),
+                save_path=cmp_dir / "exploration_det_vs_wind_dql.png",
                 figsize=(10, 5),
             )
         else:
-            strategy_bands = _run_strategy_sweep(env)
+            strategy_bands_ql = _run_strategy_sweep(env, QLearningAgent)
+            strategy_bands_dql = _run_strategy_sweep(env, DoubleQLearningAgent)
 
         plot_multi_curve_bands(
-            strategy_bands,
+            strategy_bands_ql,
             title="Q-learning: exploration strategies (mean ± std over seeds)",
-            save_path=cmp_dir / "exploration_comparison.png",
+            save_path=cmp_dir / "exploration_comparison_ql.png",
+        )
+        plot_multi_curve_bands(
+            strategy_bands_dql,
+            title="Double Q-learning: exploration strategies (mean ± std over seeds)",
+            save_path=cmp_dir / "exploration_comparison_dql.png",
         )
 
         # 5) Convergence & stability metrics (baseline config only — the
         #    comparison plots already show the per-sweep picture).
         convergence_threshold = 0.5
-        per_seed_convergence: list[dict[str, Any]] = []
-        for s, run in zip(seeds_list, baseline_runs):
+        per_seed_convergence_ql: list[dict[str, Any]] = []
+        for s, run in zip(seeds_list, baseline_runs_q_learning):
             conv_ep = episodes_to_threshold(
                 run.episode_rewards,
                 threshold=convergence_threshold,
                 window=20,
             )
-            per_seed_convergence.append(
+            per_seed_convergence_ql.append(
                 {
                     "seed": int(s),
                     "episodes_to_threshold": None if conv_ep is None else int(conv_ep),
@@ -393,10 +503,32 @@ class ExperimentRunner:
                 }
             )
 
-        conv_values = [e["episodes_to_threshold"] for e in per_seed_convergence if e["episodes_to_threshold"] is not None]
-        agreement_values = [e["policy_agreement_vs_vi"] for e in per_seed_convergence]
-        greedy_values = [e["greedy_return"] for e in per_seed_convergence]
-        wall_values = [e["wall_time_seconds"] for e in per_seed_convergence]
+        conv_values_ql = [e["episodes_to_threshold"] for e in per_seed_convergence_ql if e["episodes_to_threshold"] is not None]
+        agreement_values_ql = [e["policy_agreement_vs_vi"] for e in per_seed_convergence_ql]
+        greedy_values_ql = [e["greedy_return"] for e in per_seed_convergence_ql]
+        wall_values_ql = [e["wall_time_seconds"] for e in per_seed_convergence_ql]
+
+        per_seed_convergence_dql: list[dict[str, Any]] = []
+        for s, run in zip(seeds_list, baseline_runs_double_q_learning):
+            conv_ep = episodes_to_threshold(
+                run.episode_rewards,
+                threshold=convergence_threshold,
+                window=20,
+            )
+            per_seed_convergence_dql.append(
+                {
+                    "seed": int(s),
+                    "episodes_to_threshold": None if conv_ep is None else int(conv_ep),
+                    "policy_agreement_vs_vi": policy_agreement(run.policy, vi_res.policy),
+                    "greedy_return": run.greedy_return,
+                    "wall_time_seconds": run.wall_time_seconds,
+                }
+            )
+
+        conv_values_dql = [e["episodes_to_threshold"] for e in per_seed_convergence_dql if e["episodes_to_threshold"] is not None]
+        agreement_values_dql = [e["policy_agreement_vs_vi"] for e in per_seed_convergence_dql]
+        greedy_values_dql = [e["greedy_return"] for e in per_seed_convergence_dql]
+        wall_values_dql = [e["wall_time_seconds"] for e in per_seed_convergence_dql]
 
         convergence_summary: dict[str, Any] = {
             "threshold": convergence_threshold,
@@ -406,34 +538,63 @@ class ExperimentRunner:
                 "greedy_rollout_return": float(vi_return),
             },
             "ql": {
-                "per_seed": per_seed_convergence,
-                "episodes_to_threshold_mean": float(np.mean(conv_values)) if conv_values else None,
-                "episodes_to_threshold_std": float(np.std(conv_values, ddof=0)) if conv_values else None,
-                "episodes_to_threshold_hit_rate": len(conv_values) / len(per_seed_convergence),
-                "policy_agreement_mean": float(np.mean(agreement_values)),
-                "policy_agreement_std": float(np.std(agreement_values, ddof=0)),
-                "greedy_return_mean": float(np.mean(greedy_values)),
-                "greedy_return_std": float(np.std(greedy_values, ddof=0)),
-                "wall_time_mean_seconds": float(np.mean(wall_values)),
-                "wall_time_std_seconds": float(np.std(wall_values, ddof=0)),
+                "per_seed": per_seed_convergence_ql,
+                "episodes_to_threshold_mean": float(np.mean(conv_values_ql)) if conv_values_ql else None,
+                "episodes_to_threshold_std": float(np.std(conv_values_ql, ddof=0)) if conv_values_ql else None,
+                "episodes_to_threshold_hit_rate": len(conv_values_ql) / len(per_seed_convergence_ql),
+                "policy_agreement_mean": float(np.mean(agreement_values_ql)),
+                "policy_agreement_std": float(np.std(agreement_values_ql, ddof=0)),
+                "greedy_return_mean": float(np.mean(greedy_values_ql)),
+                "greedy_return_std": float(np.std(greedy_values_ql, ddof=0)),
+                "wall_time_mean_seconds": float(np.mean(wall_values_ql)),
+                "wall_time_std_seconds": float(np.std(wall_values_ql, ddof=0)),
+            },
+            "dql": {
+                "per_seed": per_seed_convergence_dql,
+                "episodes_to_threshold_mean": float(np.mean(conv_values_dql)) if conv_values_dql else None,
+                "episodes_to_threshold_std": float(np.std(conv_values_dql, ddof=0)) if conv_values_dql else None,
+                "episodes_to_threshold_hit_rate": len(conv_values_dql) / len(per_seed_convergence_dql),
+                "policy_agreement_mean": float(np.mean(agreement_values_dql)),
+                "policy_agreement_std": float(np.std(agreement_values_dql, ddof=0)),
+                "greedy_return_mean": float(np.mean(greedy_values_dql)),
+                "greedy_return_std": float(np.std(greedy_values_dql, ddof=0)),
+                "wall_time_mean_seconds": float(np.mean(wall_values_dql)),
+                "wall_time_std_seconds": float(np.std(wall_values_dql, ddof=0)),
             },
         }
 
         # 6) Aggregated visit heatmap across seeds.
-        visits_sum = np.sum([r.visit_counts for r in baseline_runs], axis=0)
-        visits_mean = visits_sum / float(len(baseline_runs))
+        visits_sum_ql = np.sum([r.visit_counts for r in baseline_runs_q_learning], axis=0)
+        visits_mean_ql = visits_sum_ql / float(len(baseline_runs_q_learning))
         plot_visit_heatmap(
-            visits_sum,
+            visits_sum_ql,
             env,
-            title=f"Q-learning state visits (sum over {len(baseline_runs)} seeds, log scale)",
-            save_path=analysis_dir / "visit_heatmap_sum_log.png",
+            title=f"Q-learning state visits (sum over {len(baseline_runs_q_learning)} seeds, log scale)",
+            save_path=analysis_dir / "visit_heatmap_sum_log_ql.png",
             log_scale=True,
         )
         plot_visit_heatmap(
-            visits_mean,
+            visits_mean_ql,
             env,
-            title=f"Q-learning state visits (mean over {len(baseline_runs)} seeds, log scale)",
-            save_path=analysis_dir / "visit_heatmap_mean_log.png",
+            title=f"Q-learning state visits (mean over {len(baseline_runs_q_learning)} seeds, log scale)",
+            save_path=analysis_dir / "visit_heatmap_mean_log_ql.png",
+            log_scale=True,
+        )
+
+        visits_sum_dql = np.sum([r.visit_counts for r in baseline_runs_double_q_learning], axis=0)
+        visits_mean_dql = visits_sum_dql / float(len(baseline_runs_double_q_learning))
+        plot_visit_heatmap(
+            visits_sum_dql,
+            env,
+            title=f"Double Q-learning state visits (sum over {len(baseline_runs_double_q_learning)} seeds, log scale)",
+            save_path=analysis_dir / "visit_heatmap_sum_log_dql.png",
+            log_scale=True,
+        )
+        plot_visit_heatmap(
+            visits_mean_dql,
+            env,
+            title=f"Double Q-learning state visits (mean over {len(baseline_runs_double_q_learning)} seeds, log scale)",
+            save_path=analysis_dir / "visit_heatmap_mean_log_dql.png",
             log_scale=True,
         )
 
@@ -461,24 +622,42 @@ class ExperimentRunner:
             },
             "ql": {
                 "baseline": {
-                    "per_seed_rewards": [r.episode_rewards for r in baseline_runs],
-                    "per_seed_steps": [r.episode_steps for r in baseline_runs],
-                    "per_seed_epsilons": [r.epsilons for r in baseline_runs],
-                    "per_seed_greedy_returns": [r.greedy_return for r in baseline_runs],
+                    "per_seed_rewards": [r.episode_rewards for r in baseline_runs_q_learning],
+                    "per_seed_steps": [r.episode_steps for r in baseline_runs_q_learning],
+                    "per_seed_epsilons": [r.epsilons for r in baseline_runs_q_learning],
+                    "per_seed_greedy_returns": [r.greedy_return for r in baseline_runs_q_learning],
                 },
                 "aggregate": {
-                    "mean": baseline_agg["mean"].tolist(),
-                    "std": baseline_agg["std"].tolist(),
-                    "n": int(baseline_agg["n"]),
+                    "mean": baseline_agg_ql["mean"].tolist(),
+                    "std": baseline_agg_ql["std"].tolist(),
+                    "n": int(baseline_agg_ql["n"]),
+                },
+            },
+            "dql": {
+                "baseline": {
+                    "per_seed_rewards": [r.episode_rewards for r in baseline_runs_double_q_learning],
+                    "per_seed_steps": [r.episode_steps for r in baseline_runs_double_q_learning],
+                    "per_seed_epsilons": [r.epsilons for r in baseline_runs_double_q_learning],
+                    "per_seed_greedy_returns": [r.greedy_return for r in baseline_runs_double_q_learning],
+                },
+                "aggregate": {
+                    "mean": baseline_agg_dql["mean"].tolist(),
+                    "std": baseline_agg_dql["std"].tolist(),
+                    "n": int(baseline_agg_dql["n"]),
                 },
             },
             "gamma_comparison": _bands_to_json(gamma_bands),
-            "exploration_comparison": _bands_to_json(strategy_bands),
+            "gamma_comparison_dql": _bands_to_json(gamma_bands_dql),
+            "exploration_comparison": _bands_to_json(strategy_bands_ql),
+            "exploration_comparison_dql": _bands_to_json(strategy_bands_dql),
             "convergence_and_stability": convergence_summary,
-            "visit_counts_sum": visits_sum.tolist(),
+            "visit_counts_sum": visits_sum_ql.tolist(),
+            "visit_counts_sum_dql": visits_sum_dql.tolist(),
         }
-        if exploration_det_vs_wind_bands is not None:
-            metrics_result["exploration_det_vs_wind"] = _bands_to_json(exploration_det_vs_wind_bands)
+        if exploration_det_vs_wind_bands_ql is not None:
+            metrics_result["exploration_det_vs_wind"] = _bands_to_json(exploration_det_vs_wind_bands_ql)
+        if exploration_det_vs_wind_bands_dql is not None:
+            metrics_result["exploration_det_vs_wind_dql"] = _bands_to_json(exploration_det_vs_wind_bands_dql)
         return metrics_result
 
 
@@ -493,6 +672,7 @@ def summarize_across_maps(per_map_metrics: dict[str, dict[str, Any]]) -> dict[st
     summary: dict[str, dict[str, Any]] = {}
     for slug, m in per_map_metrics.items():
         ql_summary = m["convergence_and_stability"]["ql"]
+        dql_summary = m["convergence_and_stability"]["dql"]
         vi_summary = m["convergence_and_stability"]["vi"]
         summary[slug] = {
             "env": m.get("env", {}),
@@ -508,5 +688,13 @@ def summarize_across_maps(per_map_metrics: dict[str, dict[str, Any]]) -> dict[st
             "ql_greedy_return_mean": ql_summary["greedy_return_mean"],
             "ql_greedy_return_std": ql_summary["greedy_return_std"],
             "ql_wall_time_mean_seconds": ql_summary["wall_time_mean_seconds"],
+            "dql_episodes_to_threshold_mean": dql_summary["episodes_to_threshold_mean"],
+            "dql_episodes_to_threshold_std": dql_summary["episodes_to_threshold_std"],
+            "dql_episodes_to_threshold_hit_rate": dql_summary["episodes_to_threshold_hit_rate"],
+            "dql_policy_agreement_mean": dql_summary["policy_agreement_mean"],
+            "dql_policy_agreement_std": dql_summary["policy_agreement_std"],
+            "dql_greedy_return_mean": dql_summary["greedy_return_mean"],
+            "dql_greedy_return_std": dql_summary["greedy_return_std"],
+            "dql_wall_time_mean_seconds": dql_summary["wall_time_mean_seconds"],
         }
     return {"maps": summary, "n_maps": len(summary)}
