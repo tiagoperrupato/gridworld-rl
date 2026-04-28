@@ -1,7 +1,7 @@
 from .environment import Action, Cell, GridWorld, Transition
 from .experiment import ExperimentConfig, ExperimentRunner, summarize_across_maps
 from .maps import DEFAULT_MAPS, MapChoice, get_map, map_keys
-from .q_learning import QLearningAgent, QLearningMetrics
+from .q_learning import QLearningAgent, QLearningMetrics, DoubleQLearningAgent
 from .run_dir import create_run_dir, update_latest_symlink, write_config, write_metrics
 from .value_iteration import ValueIterationResult, ValueIterationSolver
 from .visualization import (
@@ -24,6 +24,7 @@ __all__ = [
     "MapChoice",
     "QLearningAgent",
     "QLearningMetrics",
+    "DoubleQLearningAgent",
     "Transition",
     "ValueIterationResult",
     "ValueIterationSolver",

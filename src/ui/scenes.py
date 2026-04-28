@@ -19,7 +19,7 @@ import numpy as np
 
 from ..environment import _ACTION_TO_DELTA, Action, Cell, GridWorld
 from ..maps import DEFAULT_MAPS, MapChoice
-from ..q_learning import QLearningAgent, StepEvent
+from ..q_learning import BaseQLearningAgent, QLearningAgent, DoubleQLearningAgent, StepEvent
 from ..value_iteration import ValueIterationSolver
 from . import assets
 from .gif_export import GifRecorder
@@ -93,6 +93,7 @@ class MenuScene(Scene):
 
     ALGOS: list[tuple[str, str]] = [
         ("Q-LEARNING", "ql"),
+        ("DOUBLE-Q-LEARNING", "dql"),
         ("VALUE ITERATION", "vi"),
     ]
 
@@ -167,9 +168,14 @@ class MenuScene(Scene):
         # the picked character.
         _refresh_renderer_for_env(self.ctx, env, agent_rc=char_rc)
 
-        if algo == "ql":
+        if algo == "ql" or algo == "dql":
             def factory(ctx: Context) -> Scene:
-                return TrainScene(ctx, env=env, map_name=choice.name)
+                return TrainScene(
+                    ctx, 
+                    env=env, 
+                    map_name=choice.name, 
+                    AgentClass=QLearningAgent if algo == "ql" else DoubleQLearningAgent
+                )
 
             return SceneTransition(next_scene=factory)
         else:
@@ -273,17 +279,17 @@ class MenuScene(Scene):
 
 
 # ---------------------------------------------------------------------------
-# Training (Q-learning)
+# Training (Q-learning and Double Q-learning share the same scene since the only difference is the agent class).
 # ---------------------------------------------------------------------------
 
 
 class TrainScene(Scene):
-    def __init__(self, ctx: Context, *, env: GridWorld, map_name: str) -> None:
+    def __init__(self, ctx: Context, *, env: GridWorld, map_name: str, AgentClass: BaseQLearningAgent) -> None:
         super().__init__(ctx)
         self.env = env
         self.map_name = map_name
         self.cfg = TrainConfig()
-        self.agent = QLearningAgent(
+        self.agent = AgentClass(
             alpha=self.cfg.alpha,
             gamma=self.cfg.gamma,
             epsilon=self.cfg.epsilon,
@@ -442,16 +448,16 @@ class TrainScene(Scene):
     def _to_playback(self) -> SceneTransition:
         assert self.Q is not None
         idx_to_state = [s for s, _ in sorted(self.state_to_idx.items(), key=lambda kv: kv[1])]
-        policy = QLearningAgent.get_policy(self.Q, idx_to_state)
-        V = QLearningAgent.get_value_function(self.Q, idx_to_state)
-
+        policy = BaseQLearningAgent.get_policy(self.Q, idx_to_state)
+        V = BaseQLearningAgent.get_value_function(self.Q, idx_to_state)
+        label = "Q-LEARNING" if isinstance(self.agent, QLearningAgent) else "DOUBLE-Q-LEARNING"
         def factory(ctx: Context) -> Scene:
             return PlaybackScene(
                 ctx,
                 env=self.env,
                 policy=policy,
                 V=V,
-                title=f"Q-LEARNING GREEDY  -  {self.map_name}",
+                title=f"{label}  GREEDY -  {self.map_name}",
                 auto_gif_path=self.ctx.run_dir / "episode.gif",
             )
 
@@ -473,11 +479,11 @@ class TrainScene(Scene):
             self.ctx.renderer.draw_visits_overlay(self.visits, self.env)
         if self.overlay.value_map and self.Q is not None and self.state_to_idx:
             idx_to_state = [s for s, _ in sorted(self.state_to_idx.items(), key=lambda kv: kv[1])]
-            V = QLearningAgent.get_value_function(self.Q, idx_to_state)
+            V = BaseQLearningAgent.get_value_function(self.Q, idx_to_state)
             self.ctx.renderer.draw_value_overlay(V, self.env)
         if self.overlay.policy and self.Q is not None and self.state_to_idx:
             idx_to_state = [s for s, _ in sorted(self.state_to_idx.items(), key=lambda kv: kv[1])]
-            policy = QLearningAgent.get_policy(self.Q, idx_to_state)
+            policy = BaseQLearningAgent.get_policy(self.Q, idx_to_state)
             self.ctx.renderer.draw_policy_overlay(policy, self.env)
 
         bump_offset = self._current_bump_offset()
@@ -490,7 +496,8 @@ class TrainScene(Scene):
         speed_label = SPEED_LADDER[self.speed_idx][0]
         if self.paused:
             speed_label = "PAUSE"
-        title = f"Q-LEARNING  -  {self.map_name}"
+        label = "Q-LEARNING" if isinstance(self.agent, QLearningAgent) else "DOUBLE-Q-LEARNING"
+        title = f"{label}  -  {self.map_name}"
         if self.done:
             title += "   [DONE - ENTER for playback]"
 
