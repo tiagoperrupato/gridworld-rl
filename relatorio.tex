@@ -12,6 +12,7 @@
 \usepackage{array}
 \usepackage{graphicx}
 \usepackage{float}
+\usepackage{subcaption}
 \usepackage[hidelinks]{hyperref}
 
 \geometry{top=1.0cm, bottom=1.8cm, left=1.8cm, right=1.8cm}
@@ -58,7 +59,7 @@ A=\{\text{UP},\text{DOWN},\text{LEFT},\text{RIGHT}\}.
     \item modo estocástico: a ação desejada ocorre com probabilidade \texttt{wind\_prob} (padrão 0.8), e as duas ações perpendiculares dividem igualmente a massa restante.
 \end{itemize}
 
-Se a movimentação sair da grade ou bater em parede, o agente permanece no mesmo estado. Em estados terminais, a transição é absorvente (retorna ao próprio estado com probabilidade 1 e recompensa imediata 0).
+Caso o agente tente sair da grade ou bata na parede, ele permanece no mesmo estado. Em estados terminais, a transição é absorvente (retorna ao próprio estado com probabilidade 1 e recompensa imediata 0).
 
 \textbf{Recompensas e utilidade ($U$).} A recompensa imediata é definida por:
 \[
@@ -117,10 +118,24 @@ Q(s,a)\leftarrow Q(s,a)+\alpha\Big(r+\gamma\max_{a'}Q(s',a')-Q(s,a)\Big).
 \]
 
 O episódio inicia em \texttt{S}, termina ao atingir estado terminal ou \texttt{max\_steps} (padrão 200), e registra retorno acumulado e número de passos.
+\section{Double Q-learning}
+Além do Q-learning tradicional, foi implementada a variante Double Q-learning, que mantém duas tabelas $Q_A$ e $Q_B$ para reduzir o viés de superestimação. A cada passo, uma das tabelas é escolhida aleatoriamente para atualização, usando a outra tabela para estimar o valor futuro:
+\[
+\begin{cases}
+Q_A(s,a)\leftarrow Q_A(s,a)+\alpha\Big(r+\gamma Q_B(s',\arg\max_{a'}Q_A(s',a'))-Q_A(s,a)\Big), & \text{com prob. } 0.5 \\
+Q_B(s,a)\leftarrow Q_B(s,a)+\alpha\Big(r+\gamma Q_A(s',\arg\max_{a'}Q_B(s',a'))-Q_B(s,a)\Big), & \text{com prob. } 0.5
+\end{cases}
+\]
+Onde a política gulosa é extraída por:
+\[
+\pi(s)=\arg\max_a \left(Q_A(s,a)+Q_B(s,a)\right).
+\]
 
-\subsection*{Exploração adotada}
+O episódio e os critérios de término são os mesmos do Q-learning tradicional.
 
-A política de comportamento é $\varepsilon$-gulosa:
+\section{Exploração adotada}
+
+Para ambas as estratégias (Q-learning e Double Q-learning), a política de comportamento é $\varepsilon$-gulosa:
 \begin{itemize}
     \item com probabilidade $\varepsilon$, escolhe ação aleatória uniforme;
     \item caso contrário, escolhe $\arg\max_a Q(s,a)$.
@@ -147,20 +162,11 @@ Na interface interativa, o treinamento de Q-learning usa por padrão 500 episód
 
 Além dos plots estáticos, foi implementada uma UI arcade que permite acompanhar o treinamento em tempo real e inspecionar qualitativamente a política aprendida.
 
-Na tela de menu, é possível configurar diferentes experimentos combinando: (i) algoritmo (\textit{Q-learning} ou \textit{Value Iteration}), (ii) mapa (\texttt{DEFAULT 5x5}, \texttt{OPEN 7x7}, \texttt{MAZE 9x9}, \texttt{GAUNTLET 6x10}) e (iii) vento estocástico ligado/desligado. Durante a execução, a UI oferece controles de pausa, passo-a-passo e velocidade, além de sobreposições de valor ($V$), política ($P$) e mapa de visitas ($H$). Ao final, é possível reproduzir a trajetória gulosa e gravar GIFs para documentação dos resultados.
+Na tela de menu, é possível configurar diferentes experimentos combinando: (i) algoritmo (\textit{Q-learning}, (\textit{Double Q-learning} ou \textit{Value Iteration}), (ii) mapa (\texttt{DEFAULT 5x5}, \texttt{OPEN 7x7}, \texttt{MAZE 9x9}, \texttt{GAUNTLET 6x10}) e (iii) vento estocástico ligado/desligado. Durante a execução, a UI oferece controles de pausa, passo-a-passo e velocidade, além de sobreposições de valor ($V$), política ($P$) e mapa de visitas ($H$). Ao final, é possível reproduzir a trajetória gulosa e gravar GIFs para documentação dos resultados.
 
 \section{Avaliação Experimental e Discussão}
 
-Os principais experimentos e plots foram realizados com um grid fixo, representado na Imagem \ref{grid}. Em verde, está a posição inicial do agente, em preto estão as paredes do ambiente, em verde está o objetivo e em vermelho está o estado terminal.
-
-\begin{figure}
-    \centering
-    \includegraphics[width=0.4\linewidth]{grid_customizado_5x5.png}
-    \caption{Grid utilizado para experimentos.}
-    \label{grid}
-\end{figure}
-
-Os experimentos realizados avaliaram o desempenho e a convergência dos algoritmos \textit{Value Iteration} (VI) e \textit{Q-learning} no ambiente \textit{GridWorld} proposto. A análise conjunta dos resultados revela grande consistência entre a abordagem \emph{model-based} e a \emph{model-free}, com ambas alcançando uma política de alta qualidade, mas exibindo dinâmicas de aprendizado e \textit{trade-offs} distintos ao longo do processo. A UI foi usada como apoio para validação qualitativa das trajetórias e da evolução das políticas em diferentes mapas.
+Os experimentos realizados avaliaram o desempenho e a convergência dos algoritmos \textit{Value Iteration} (VI), \textit{Q-learning} e (\textit{Double Q-learning} no ambiente \textit{GridWorld} proposto. A análise conjunta dos resultados revela grande consistência entre a abordagem \emph{model-based} e a \emph{model-free}, com ambas alcançando uma política de alta qualidade, mas exibindo dinâmicas de aprendizado e \textit{trade-offs} distintos ao longo do processo. A UI foi usada como apoio para validação qualitativa das trajetórias e da evolução das políticas em diferentes mapas.
 
 \textbf{Convergência e Estabilidade.} O algoritmo \textit{Value Iteration} apresentou uma convergência notavelmente rápida e com decréscimo monotônico do erro (observável pela curva de $\max|\Delta V|$), estabilizando completamente em cerca de 10 iterações. Esse comportamento é esperado, dado que o algoritmo possui acesso explícito e integral às funções de transição e recompensa do modelo, além de operar sobre um espaço de estados de dimensionalidade reduzida. Em contrapartida, a curva de aprendizado do \textit{Q-learning} reflete sua natureza amostral e exploratória. Durante os episódios iniciais, o algoritmo registra alta variância e retornos fortemente negativos (com quedas próximas a $-8$), decorrentes das frequentes visitas à armadilha geradas pela exploração aleatória. No entanto, o aprendizado demonstra-se eficaz: após uma fase transitória que varia entre 100 e 250 episódios, o retorno estabiliza-se em um patamar positivo constante, equiparando-se ao ótimo obtido analiticamente pelo VI.
 
@@ -168,6 +174,105 @@ Os experimentos realizados avaliaram o desempenho e a convergência dos algoritm
 
 \textbf{Impacto dos Hiperparâmetros.} A variação na estratégia de exploração do \textit{Q-learning} elucida o clássico dilema \textit{exploration vs. exploitation}. Configurações com alta taxa de exploração inicial (como $\varepsilon = 1.0$) garantem uma varredura abrangente do espaço de estados, reduzindo o risco de o agente cristalizar prematuramente uma política subótima (miopia estratégica). O custo inerente dessa abordagem é um pior desempenho inicial, evidenciado pelas frequentes quedas na recompensa. Em contrapartida, variações no fator de desconto $\gamma$ (0.5, 0.9 e 0.99) demonstraram impactar primordialmente a velocidade com que o algoritmo cruza a fase transitória de estabilização, embora, neste ambiente específico, todas as configurações testadas tenham convergido para patamares de retorno médio muito semelhantes ao final dos 1000 episódios.
 
-\textbf{Trade-offs e Limitações.} Os resultados materializam os principais \textit{trade-offs} da literatura: métodos \emph{model-based} oferecem estabilidade e rapidez algorítmica, porém ao custo restritivo de exigir um modelo perfeito (\textit{prior knowledge}) do domínio. Métodos \emph{model-free}, por dispensarem essa premissa, operam com maior flexibilidade, mas demandam um custo amostral significativamente mais alto no início da execução. Cabe ressaltar que as conclusões atuais estão atreladas a um ambiente de dimensões reduzidas e não estocástico em sua forma base. O experimento carece de intervalos de confiança computados a partir de múltiplas sementes aleatórias. Para desdobramentos futuros, recomenda-se a ativação da probabilidade de transição estocástica (vento) e a agregação estatística dos episódios para avaliar a robustez das políticas aprendidas sob incerteza.
+\textbf{Análise com diferentes sementes.} Quanto à análise em diferentes sementes aleatórias de grids, temos que a agregação por múltiplas sementes confirma que as flutuações de desempenho — marcantes na fase transitória — são inerentes à estocasticidade do aprendizado \emph{model-free}. No entanto, reafirma a robustez assintótica do algoritmo: independentemente do caminho de exploração escolhido (rápido e direto ou demorado e abrangente), o \textit{Q-learning} é capaz de superar a ignorância inicial e encontrar a trajetória ótima de forma confiável.
+
+\textbf{Trade-offs e Limitações.} Os resultados materializam os principais \textit{trade-offs} da literatura: métodos \emph{model-based} oferecem estabilidade e rapidez algorítmica, porém ao custo restritivo de exigir um modelo perfeito (\textit{prior knowledge}) do domínio. Métodos \emph{model-free}, por dispensarem essa premissa, operam com maior flexibilidade, mas demandam um custo amostral significativamente mais alto no início da execução. 
+
+\section{Plots}
+
+\begin{figure}[b]
+    \centering
+    \begin{subfigure}[b]{0.5\textwidth}
+        \centering
+        \includegraphics[width=\textwidth]{ql/learning_curve.png}
+        \caption{Curva de aprendizado}
+        \label{fig:plot1}
+    \end{subfigure}
+    \hfill 
+    \begin{subfigure}[b]{0.35\textwidth}
+        \centering
+        \includegraphics[width=\textwidth]{ql/value_map.png}
+        \caption{Mapa de valores}
+        \label{fig:plot2}
+    \end{subfigure}
+    \hfill 
+    \begin{subfigure}[b]{0.35\textwidth}
+        \centering
+        \includegraphics[width=\textwidth]{ql/policy.png}
+        \caption{Política aprendida}
+        \label{fig:plot2}
+    \end{subfigure}
+    \hfill 
+    \begin{subfigure}[b]{0.35\textwidth}
+        \centering
+        \includegraphics[width=\textwidth]{ql/trajectory.png}
+        \caption{Trajetória aprendida}
+        \label{fig:plot2}
+    \end{subfigure}
+    \caption{Plots obtidos para algoritmo de Q-learning.}
+    \label{fig:conjunto Q-learning}
+\end{figure}
+
+\begin{figure}
+    \centering
+    \begin{subfigure}[b]{0.5\textwidth}
+        \centering
+        \includegraphics[width=\textwidth]{vi/convergence.png}
+        \caption{Curva de convergência}
+        \label{fig:plot1}
+    \end{subfigure}
+    \hfill 
+    \begin{subfigure}[b]{0.35\textwidth}
+        \centering
+        \includegraphics[width=\textwidth]{vi/value_map.png}
+        \caption{Mapa de valores}
+        \label{fig:plot2}
+    \end{subfigure}
+    \hfill 
+    \begin{subfigure}[b]{0.35\textwidth}
+        \centering
+        \includegraphics[width=\textwidth]{vi/policy.png}
+        \caption{Política aprendida}
+        \label{fig:plot2}
+    \end{subfigure}
+    \hfill 
+    \begin{subfigure}[b]{0.35\textwidth}
+        \centering
+        \includegraphics[width=\textwidth]{vi/trajectory.png}
+        \caption{Trajetória aprendida}
+        \label{fig:plot2}
+    \end{subfigure}
+    \caption{Plots obtidos para algoritmo de Value Iteration.}
+    \label{fig:conjunto Value Iteration}
+\end{figure}
+
+\begin{figure}
+    \centering
+    \begin{subfigure}[b]{0.44\textwidth}
+        \centering
+        \includegraphics[width=\textwidth]{exploration_comparison.png}
+        \label{fig:plot1}
+    \end{subfigure}
+    \hfill 
+    \begin{subfigure}[b]{0.44\textwidth}
+        \centering
+        \includegraphics[width=\textwidth]{gamma_comparison.png}
+        \label{fig:plot2}
+    \end{subfigure}
+    \hfill 
+    \begin{subfigure}[b]{0.44\textwidth}
+        \centering
+        \includegraphics[width=\textwidth]{vi_vs_ql_rewards.png}
+        \label{fig:plot2}
+    \end{subfigure}
+    \hfill 
+    \begin{subfigure}[b]{0.44\textwidth}
+        \centering
+        \includegraphics[width=\textwidth]{exploration.jpeg}
+        \label{fig:seeds}
+    \end{subfigure}
+    \caption{Comparação entre algoritmos implementados.}
+    \label{fig:comparacao}
+\end{figure}
 
 \end{document}
