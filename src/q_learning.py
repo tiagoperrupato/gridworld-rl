@@ -210,7 +210,7 @@ class BaseQLearningAgent(abc.ABC):
 
 class QLearningAgent(BaseQLearningAgent):
     def _initialize_Q(self, num_states: int) -> np.ndarray:
-        return np.zeros((num_states, 4), dtype=float)
+        return self._rng.uniform(-0.01, 0.01, (num_states, 4))
 
     def _q_view(self, Q: np.ndarray) -> np.ndarray:
         return Q
@@ -229,11 +229,13 @@ class QLearningAgent(BaseQLearningAgent):
 
 class DoubleQLearningAgent(BaseQLearningAgent):
     def _initialize_Q(self, num_states: int) -> tuple[np.ndarray, np.ndarray]:
-        return (np.zeros((num_states, 4), dtype=float), np.zeros((num_states, 4), dtype=float))
+        Q1 = self._rng.uniform(-0.01, 0.01, (num_states, 4))
+        Q2 = self._rng.uniform(-0.01, 0.01, (num_states, 4))
+        return Q1, Q2
 
     def _q_view(self, Q: tuple[np.ndarray, np.ndarray]) -> np.ndarray:
         Q1, Q2 = Q
-        return Q1 + Q2
+        return (Q1 + Q2) / 2
 
     def _td_update(
         self,
