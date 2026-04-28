@@ -177,10 +177,10 @@ def plot_convergence(deltas, *, title="Value Iteration convergence (delta)", sav
     _save_or_show(save_path)
 
 
-def plot_comparison(vi_rewards, ql_rewards, *, title="Bellman vs Q-learning", save_path: Path | None = None) -> None:
+def plot_comparison(vi_rewards, ql_rewards, *, title="Bellman vs Q-learning", label1="VI eval (per rollout)", label2="Q-learning (per episode)", save_path: Path | None = None) -> None:
     plt.figure(figsize=(7, 4))
-    plt.plot(vi_rewards, label="VI eval (per rollout)", linewidth=2)
-    plt.plot(ql_rewards, label="Q-learning (per episode)", linewidth=1)
+    plt.plot(vi_rewards, label=label1, linewidth=2)
+    plt.plot(ql_rewards, label=label2, linewidth=1)
     plt.xlabel("Episode / rollout")
     plt.ylabel("Reward")
     plt.title(title)
