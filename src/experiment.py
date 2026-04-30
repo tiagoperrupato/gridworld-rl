@@ -698,3 +698,80 @@ def summarize_across_maps(per_map_metrics: dict[str, dict[str, Any]]) -> dict[st
             "dql_wall_time_mean_seconds": dql_summary["wall_time_mean_seconds"],
         }
     return {"maps": summary, "n_maps": len(summary)}
+
+
+def plot_across_maps(per_map_metrics: dict[str, dict[str, Any]], save_dir: Path) -> None:
+    """Plot cumulative reward per episode, averaged across all seeds and maps.
+    
+    For each map, per_map_metrics[map_slug]['exploration_comparison'] has the 
+    strategy comparison bands. We combine these across maps into a single plot 
+    with one curve per strategy, where:
+    - Each curve's mean is the mean of that strategy's means across maps
+    - Each curve's std is calculated using the law of total variance:
+      std^2 = mean(per_map_std^2) + var(per_map_means)
+    """
+    if not per_map_metrics:
+        return
+    
+    # Collect all strategy names and their data across maps
+    strategy_per_map_data: dict[str, dict[str, list[np.ndarray]]] = {}
+    
+    for map_slug, metrics in per_map_metrics.items():
+        if 'exploration_comparison' not in metrics:
+            continue
+        
+        exploration_comparison = metrics['exploration_comparison']
+        for strategy_name, series in exploration_comparison.items():
+            if strategy_name not in strategy_per_map_data:
+                strategy_per_map_data[strategy_name] = {"mean": [], "std": []}
+            
+            strategy_per_map_data[strategy_name]["mean"].append(
+                np.asarray(series["mean"], dtype=float)
+            )
+            strategy_per_map_data[strategy_name]["std"].append(
+                np.asarray(series["std"], dtype=float)
+            )
+    
+    if not strategy_per_map_data:
+        return
+    
+    # Combine across maps using law of total variance
+    # Var(total) = E[Var_per_map] + Var(E_per_map)
+    combined_curves = {}
+    
+    for strategy_name, per_map_data in strategy_per_map_data.items():
+        per_map_means = per_map_data["mean"]
+        per_map_stds = per_map_data["std"]
+        
+        # Find minimum length to ensure alignment
+        min_len = min(len(m) for m in per_map_means)
+        if min_len == 0:
+            continue
+        
+        # Truncate all to minimum length
+        per_map_means_truncated = np.asarray([m[:min_len] for m in per_map_means])
+        per_map_stds_truncated = np.asarray([s[:min_len] for s in per_map_stds])
+        
+        # Combined mean: average of per-map means
+        combined_mean = per_map_means_truncated.mean(axis=0)
+        
+        # Combined variance using law of total variance:
+        # Var(total) = E[Var_per_map] + Var(E_per_map)
+        variance_of_means = per_map_means_truncated.var(axis=0, ddof=0)  # Var(E_per_map)
+        mean_of_variances = (per_map_stds_truncated ** 2).mean(axis=0)    # E[Var_per_map]
+        combined_variance = mean_of_variances + variance_of_means
+        combined_std = np.sqrt(combined_variance)
+        
+        combined_curves[strategy_name] = {
+            "mean": combined_mean,
+            "std": combined_std,
+        }
+    
+    if combined_curves:
+        save_dir.mkdir(parents=True, exist_ok=True)
+        plot_multi_curve_bands(
+            combined_curves,
+            title="Exploration strategies: averaged across all maps and seeds",
+            ylabel="Cumulative reward per episode",
+            save_path=save_dir / "exploration_comparison_across_maps.png",
+        )   

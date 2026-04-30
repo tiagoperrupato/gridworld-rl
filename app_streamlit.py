@@ -48,8 +48,10 @@ def build_run_slug(params: dict) -> str:
     if maps != DEFAULTS["maps"]:
         if "all" in maps:
             parts.append("allmaps")
-        else:
+        elif len(maps) > 0:
             parts.append("-".join(maps))
+    if params["number_random_maps"] > 0:
+        parts.append(f"rand{params['number_random_maps']}x{params['random_map_size']}")
     if params["stochastic"] != DEFAULTS["stochastic"]:
         parts.append(f"wind{int(params['wind_prob'] * 100)}")
     elif params["wind_prob"] != DEFAULTS["wind_prob"]:
@@ -81,6 +83,8 @@ def build_run_slug(params: dict) -> str:
 def build_argv(params: dict, run_name: str) -> list[str]:
     argv: list[str] = [sys.executable, "main.py"]
     argv += ["--maps", *params["maps"]]
+    argv += ["--number-random-maps", str(params["number_random_maps"])]
+    argv += ["--random-map-size", str(params["random_map_size"])]
     argv += ["--seeds", *map(str, params["seeds"])]
     argv += ["--run-name", run_name]
     argv += ["--output-dir", params["output_dir"]]
@@ -178,6 +182,11 @@ def main() -> None:
         st.header("Maps")
         map_options = [*map_keys(), "all"]
         maps = st.multiselect("Maps to sweep", options=map_options, default=DEFAULTS["maps"])
+        random_maps = st.number_input("Number of random maps to generate", min_value=0, max_value=100, value=0, step=1)
+        if (random_maps > 0):
+            random_map_size = st.number_input("Size of random maps (NxN)", min_value=5, max_value=50, value=12, step=1)
+        else:
+            random_map_size = 0
 
         st.header("Environment")
         stochastic = st.checkbox("Stochastic wind", value=DEFAULTS["stochastic"])
@@ -245,8 +254,8 @@ def main() -> None:
         output_dir = st.text_input("output directory", value=DEFAULTS["output_dir"])
         run_name_override = st.text_input("run name (leave blank for auto)", value="")
 
-    if not maps:
-        st.warning("Select at least one map in the sidebar to continue.")
+    if not maps and random_maps == 0:
+        st.warning("Select at least one map to continue.")
         return
 
     params = {
@@ -264,6 +273,8 @@ def main() -> None:
         "epsilon_min": float(epsilon_min),
         "seeds": list(seeds),
         "output_dir": output_dir or DEFAULTS["output_dir"],
+        "number_random_maps": int(random_maps),
+        "random_map_size": int(random_map_size),
     }
 
     auto_slug = build_run_slug(params)

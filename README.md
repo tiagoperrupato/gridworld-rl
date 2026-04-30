@@ -108,7 +108,8 @@ Launch:
 | Esc | Back to menu (from a scene) / quit (from menu) |
 | Space | Pause / resume training |
 | Right arrow | Step once (when paused) |
-| `+` / `-` | Cycle speed (1x → 2x → 4x → 8x → 16x → TURBO) |
+| `+` / `-` | Cycle speed (0.125x → 0.25x → 0.5x → 1x → 2x → 4x → 8x → 16x → TURBO) |
+| `F` | Hold to fast-forward |
 | `V` | Toggle V(s) heatmap overlay |
 | `P` | Toggle greedy policy arrows |
 | `H` | Toggle visit-count heatmap |
