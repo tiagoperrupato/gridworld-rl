@@ -18,7 +18,7 @@ from typing import Callable, Optional
 import numpy as np
 
 from ..environment import _ACTION_TO_DELTA, Action, Cell, GridWorld
-from ..maps import DEFAULT_MAPS, MapChoice
+from ..maps import DEFAULT_MAPS, MapChoice, generate_random_map, is_solvable
 from ..q_learning import BaseQLearningAgent, QLearningAgent, DoubleQLearningAgent, StepEvent
 from ..value_iteration import ValueIterationSolver
 from . import assets
@@ -31,13 +31,16 @@ BUMP_FRAMES = 6  # how many draws a wall-bump wiggle lasts
 
 # Speed ladder (steps per rendered frame). "turbo" skips rendering inside
 # long bursts to finish training quickly.
-SPEED_LADDER: list[tuple[str, int, bool]] = [
-    ("1x", 1, True),
-    ("2x", 2, True),
-    ("4x", 4, True),
-    ("8x", 8, True),
-    ("16x", 16, True),
-    ("TURBO", 200, False),
+SPEED_LADDER: list[tuple[str, float, bool]] = [
+    ("0.125x", 0.125, True),
+    ("0.25x", 0.25, True),
+    ("0.5x", 0.5, True),
+    ("1x", 1.0, True),
+    ("2x", 2.0, True),
+    ("4x", 4.0, True),
+    ("8x", 8.0, True),
+    ("16x", 16.0, True),
+    ("TURBO", 200.0, False),
 ]
 
 
@@ -142,7 +145,7 @@ class MenuScene(Scene):
         if self.focus == self._ALGO:
             self.algo_idx = (self.algo_idx + delta) % len(self.ALGOS)
         elif self.focus == self._MAP:
-            self.map_idx = (self.map_idx + delta) % len(DEFAULT_MAPS)
+            self.map_idx = (self.map_idx + delta) % (len(DEFAULT_MAPS) + 1)  # +1 for random maps
         elif self.focus == self._WIND:
             self.stochastic = not self.stochastic
         elif self.focus == self._CHAR:
@@ -153,7 +156,18 @@ class MenuScene(Scene):
 
     def _confirm(self) -> Optional[SceneTransition]:
         self.ctx.sounds.play("select")
-        choice = DEFAULT_MAPS[self.map_idx]
+        if self.map_idx == len(DEFAULT_MAPS):
+            # Generate a random map.
+            for attempt in range(1000):
+                choice = generate_random_map(12, 12, (0, 0), (11, 11), num_traps=4, wall_prob=0.2)
+                if is_solvable(choice):
+                    break
+            else:
+                print("[UI] Failed to generate a solvable random map after 1000 attempts.")
+                return None
+        else:
+            choice = DEFAULT_MAPS[self.map_idx]
+
         env = GridWorld.from_layout(
             choice.layout,
             stochastic=self.stochastic,
@@ -205,7 +219,7 @@ class MenuScene(Scene):
         char_name = assets.CHARACTER_ORDER[self.char_idx]
         rows = [
             ("ALGORITHM", self.ALGOS[self.algo_idx][0]),
-            ("MAP      ", DEFAULT_MAPS[self.map_idx].name),
+            ("MAP      ", "RANDOM 12x12" if self.map_idx == len(DEFAULT_MAPS) else DEFAULT_MAPS[self.map_idx].name),
             ("WIND     ", "ON" if self.stochastic else "OFF"),
             ("CHARACTER", char_name),
             ("START    ", "PRESS ENTER"),
@@ -300,7 +314,8 @@ class TrainScene(Scene):
         self.stream = self.agent.train_stream(
             env, num_episodes=self.cfg.episodes, max_steps=self.cfg.max_steps
         )
-        self.speed_idx = 2  # 4x default
+        self.speed_idx = 3  # 1x default
+        self.sped_up = False
         self.paused = False
         self.single_step = False
         self.overlay = OverlayState()
@@ -326,10 +341,17 @@ class TrainScene(Scene):
     def handle_event(self, event) -> Optional[SceneTransition]:
         import pygame
 
-        if event.type != pygame.KEYDOWN:
+        if event.type == pygame.KEYUP:
+            if event.key == pygame.K_f:
+                self.sped_up = False
             return None
 
+        if event.type != pygame.KEYDOWN:
+            return None
+    
         key = event.key
+        if key == pygame.K_f:
+            self.sped_up = True
         if key == pygame.K_ESCAPE:
             return SceneTransition(next_scene=_menu_factory)
         if key == pygame.K_SPACE:
@@ -375,7 +397,11 @@ class TrainScene(Scene):
         if self.done:
             return None
 
-        _label, n_steps, should_render = SPEED_LADDER[self.speed_idx]
+        if self.sped_up:
+            _label, n_steps, should_render = SPEED_LADDER[-2]
+        else:
+            _label, n_steps, should_render = SPEED_LADDER[self.speed_idx]
+        
 
         if self.paused:
             if self.single_step:
@@ -383,10 +409,14 @@ class TrainScene(Scene):
                 self.single_step = False
             return None
 
-        for _ in range(n_steps):
-            if self.done:
-                break
-            self._advance_one_step()
+        if n_steps >= 1:
+            for _ in range(int(n_steps)):
+                if self.done:
+                    break
+                self._advance_one_step()
+        else:   # fractional steps: only advance every Nth update
+            if self.frame_tick % int(1 / n_steps) == 0:
+                self._advance_one_step()
 
         self.frame_tick += 1
         if self.frame_tick % 6 == 0:
@@ -493,7 +523,8 @@ class TrainScene(Scene):
         if self._bump_remaining > 0:
             self._bump_remaining -= 1
 
-        speed_label = SPEED_LADDER[self.speed_idx][0]
+        speed_idx = len(SPEED_LADDER) - 2 if self.sped_up else self.speed_idx
+        speed_label = SPEED_LADDER[speed_idx][0]
         if self.paused:
             speed_label = "PAUSE"
         label = "Q-LEARNING" if isinstance(self.agent, QLearningAgent) else "DOUBLE-Q-LEARNING"
@@ -516,6 +547,7 @@ class TrainScene(Scene):
                 "SPACE=pause",
                 "RIGHT=step",
                 "+/-=speed",
+                "F=fast",
                 "V=value",
                 "P=policy",
                 "H=visits",
@@ -612,6 +644,7 @@ class PlaybackScene(Scene):
 
         if event.type != pygame.KEYDOWN:
             return None
+
         if event.key == pygame.K_ESCAPE or event.key == pygame.K_RETURN:
             return self._finish()
         if event.key == pygame.K_SPACE and self.done:

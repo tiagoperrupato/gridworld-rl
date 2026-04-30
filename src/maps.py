@@ -82,6 +82,20 @@ DEFAULT_MAPS: list[MapChoice] = [
             "....T....G",
         ),
     ),
+    MapChoice(
+        "CORRIDORS 10x4",
+        (
+            "S...",
+            ".##.",
+            ".T#.",
+            ".T#.",
+            ".T#.",
+            ".T#.",
+            ".T#.",
+            ".T#.",
+            ".##.",
+            "G...",  )
+    ),
 ]
 
 
@@ -111,3 +125,74 @@ def get_map(key: str) -> MapChoice:
 def map_keys() -> list[str]:
     """All short keys in declaration order — useful for argparse `choices`."""
     return [m.name.split()[0].lower() for m in DEFAULT_MAPS]
+
+def generate_random_map(rows, cols, start, goal, num_traps, wall_prob = 0.3, name=None, rng=None) -> MapChoice:
+    """Generate a random map with the given dimensions and number of traps.
+    Walls and traps are added randomly"""
+    import random
+
+    if rng is None:
+        rng = random.Random()
+    layout = [["." for _ in range(cols)] for _ in range(rows)]
+    layout[start[0]][start[1]] = "S"
+    layout[goal[0]][goal[1]] = "G"
+
+    # Place traps randomly, avoiding start and goal.
+    empty_cells = [(r, c) for r in range(rows) for c in range(cols) if (r, c) not in [start, goal]]
+    rng.shuffle(empty_cells)
+    for r, c in empty_cells[:num_traps]:
+        layout[r][c] = "T"
+
+    # Add walls randomly.
+    for r in range(rows):
+        for c in range(cols):
+            if (r, c) not in [start, goal] and layout[r][c] == ".":
+                if rng.random() < wall_prob:
+                    layout[r][c] = "#"
+
+    return MapChoice(name or f"RANDOM {rows}x{cols} ({num_traps} traps)", tuple("".join(row) for row in layout))
+
+
+def is_solvable(map_choice: MapChoice) -> bool:
+    """Check if the map is solvable using a simple breadth-first search."""
+    from collections import deque
+
+    layout = map_choice.layout
+    rows, cols = len(layout), len(layout[0])
+    start = next((r, c) for r in range(rows) for c in range(cols) if layout[r][c] == "S")
+    goal = next((r, c) for r in range(rows) for c in range(cols) if layout[r][c] == "G")
+
+    queue = deque([start])
+    visited = set()
+    while queue:
+        r, c = queue.popleft()
+        if (r, c) == goal:
+            return True
+        if (r, c) in visited:
+            continue
+        visited.add((r, c))
+        for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+            nr, nc = r + dr, c + dc
+            if 0 <= nr < rows and 0 <= nc < cols and layout[nr][nc] not in ("#", "T") and (nr, nc) not in visited:
+                queue.append((nr, nc))
+    return False
+
+def generate_solvable_maps(num_maps: int, side : int, seed=None, max_attempts: int = 1000) -> list[MapChoice]:
+    """Generate a list of random maps with the given parameters."""
+    import random
+    rng = random.Random(seed) if seed is not None else random.Random()
+    rows = cols = side
+    num_traps = max(1, (rows * cols)//16)  # Heuristic: 1 trap per 16 cells
+    wall_prob = 0.2
+    maps = []
+    for i in range(num_maps):
+        print(f"Generating map {i + 1}/{num_maps}...")
+        map_name = f"RANDOM {rows}x{cols} ({num_traps} traps) #{i:03d}"
+        for attempt in range(max_attempts):
+            map_choice = generate_random_map(rows, cols, (0, 0), (rows - 1, cols - 1), num_traps, wall_prob, map_name, rng)
+            if is_solvable(map_choice):
+                maps.append(map_choice)
+                break
+        else:
+            print(f"Failed to generate a solvable map after {max_attempts} attempts.")
+    return maps

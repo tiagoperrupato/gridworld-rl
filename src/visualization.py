@@ -68,7 +68,7 @@ def plot_policy(policy, env: GridWorld, *, title="Policy", save_path: Path | Non
         pivot="middle", color="tab:blue", zorder=2,
         angles="xy", scale_units="xy", scale=1.6,
     )
-    _annotate_cells(env)
+    _annotate_cells(env, alpha=0.6)
     plt.title(title)
     plt.xticks(range(env.w))
     plt.yticks(range(env.h))
@@ -303,7 +303,7 @@ def _trailing_mean(x: np.ndarray, window: int) -> np.ndarray:
     return out
 
 
-def _annotate_cells(env: GridWorld, *, ax=None) -> None:
+def _annotate_cells(env: GridWorld, *, ax=None, alpha=1.0) -> None:
     ax = ax if ax is not None else plt.gca()
     letter_effects = [path_effects.withStroke(linewidth=2.0, foreground="black")]
     for r in range(env.h):
@@ -322,6 +322,7 @@ def _annotate_cells(env: GridWorld, *, ax=None) -> None:
                     edgecolor="black",
                     linewidth=1.2,
                     zorder=5,
+                    alpha=alpha,
                 )
             )
             txt = ax.text(

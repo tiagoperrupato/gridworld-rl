@@ -5,7 +5,8 @@ import os
 from pathlib import Path
 
 from src.environment import GridWorld
-from src.maps import get_map, map_keys
+from src.experiment import plot_across_maps
+from src.maps import generate_solvable_maps, get_map, map_keys
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
@@ -38,7 +39,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     )
     p.add_argument(
         "--maps",
-        nargs="+",
+        nargs="*",
         default=["default"],
         choices=[*map_keys(), "all"],
         help=(
@@ -46,6 +47,18 @@ def build_arg_parser() -> argparse.ArgumentParser:
             f"{map_keys()} or 'all' for every map. Each map gets its own "
             "subdirectory inside the run folder."
         ),
+    )
+    p.add_argument(
+        "--number-random-maps",
+        type=int,
+        default=0,
+        help="Number of random maps to generate (default: 0)",
+    )
+    p.add_argument(
+        "--random-map-size",
+        type=int,
+        default=12,
+        help="Size of each random map (default: 12)",
     )
     p.add_argument(
         "--output-dir",
@@ -89,8 +102,11 @@ def main() -> None:
         seeds_list = [0, 1, 2, 3, 4]
 
     selected_maps = _resolve_maps(args.maps)
-    if not selected_maps:
-        raise SystemExit("--maps must select at least one map")
+    random_maps = generate_solvable_maps(args.number_random_maps, args.random_map_size, seed=seeds_list[0], max_attempts=1000)
+    all_maps = selected_maps + random_maps
+
+    if not all_maps:
+        raise SystemExit("select at least one built-in map with --maps or set --number-random-maps > 0")
 
     cfg = ExperimentConfig(
         gamma=args.gamma,
@@ -108,8 +124,8 @@ def main() -> None:
 
     per_map_metrics: dict[str, dict] = {}
     print(f"Run directory: {run_dir.resolve()}")
-    print(f"Maps to sweep: {[m.name for m in selected_maps]}")
-    for mc in selected_maps:
+    print(f"Maps to sweep: {[m.name for m in all_maps]}")
+    for mc in all_maps:
         env = GridWorld.from_layout(
             mc.layout,
             stochastic=args.stochastic,
@@ -140,8 +156,8 @@ def main() -> None:
         extra={
             "seed": args.seed,
             "seeds": seeds_list,
-            "maps": [m.slug for m in selected_maps],
-            "map_names": [m.name for m in selected_maps],
+            "maps": [m.slug for m in all_maps],
+            "map_names": [m.name for m in all_maps],
             "stochastic": args.stochastic,
             "wind_prob": args.wind_prob,
             "compare_wind_exploration": args.compare_wind_exploration,
@@ -153,6 +169,10 @@ def main() -> None:
             "cross_map_summary": summarize_across_maps(per_map_metrics),
             "per_map": per_map_metrics,
         },
+    )
+    plot_across_maps(
+        per_map_metrics,
+        run_dir,
     )
 
     update_latest_symlink(run_dir)
