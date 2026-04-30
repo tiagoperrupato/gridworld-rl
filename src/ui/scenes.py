@@ -31,16 +31,16 @@ BUMP_FRAMES = 6  # how many draws a wall-bump wiggle lasts
 
 # Speed ladder (steps per rendered frame). "turbo" skips rendering inside
 # long bursts to finish training quickly.
-SPEED_LADDER: list[tuple[str, int, bool]] = [
+SPEED_LADDER: list[tuple[str, float, bool]] = [
     ("0.125x", 0.125, True),
     ("0.25x", 0.25, True),
     ("0.5x", 0.5, True),
-    ("1x", 1, True),
-    ("2x", 2, True),
-    ("4x", 4, True),
-    ("8x", 8, True),
-    ("16x", 16, True),
-    ("TURBO", 200, False),
+    ("1x", 1.0, True),
+    ("2x", 2.0, True),
+    ("4x", 4.0, True),
+    ("8x", 8.0, True),
+    ("16x", 16.0, True),
+    ("TURBO", 200.0, False),
 ]
 
 
@@ -410,7 +410,7 @@ class TrainScene(Scene):
             return None
 
         if n_steps >= 1:
-            for _ in range(n_steps):
+            for _ in range(int(n_steps)):
                 if self.done:
                     break
                 self._advance_one_step()
