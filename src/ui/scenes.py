@@ -163,7 +163,7 @@ class MenuScene(Scene):
                 if is_solvable(choice):
                     break
             else:
-                print("[UI] Failed to generate a solvable random map after 10 attempts.")
+                print("[UI] Failed to generate a solvable random map after 1000 attempts.")
                 return None
         else:
             choice = DEFAULT_MAPS[self.map_idx]
