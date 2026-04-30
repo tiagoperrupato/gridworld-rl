@@ -106,7 +106,7 @@ def main() -> None:
     all_maps = selected_maps + random_maps
 
     if not all_maps:
-        raise SystemExit("--maps must select at least one map")
+        raise SystemExit("select at least one built-in map with --maps or set --number-random-maps > 0")
 
     cfg = ExperimentConfig(
         gamma=args.gamma,
