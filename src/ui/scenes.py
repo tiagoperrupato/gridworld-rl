@@ -46,7 +46,7 @@ SPEED_LADDER: list[tuple[str, float, bool]] = [
 
 @dataclass
 class TrainConfig:
-    episodes: int = 500
+    episodes: int = 675
     max_steps: int = 200
     alpha: float = 0.1
     gamma: float = 0.99
