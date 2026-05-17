@@ -12,6 +12,16 @@ All core algorithms are implemented **from scratch** (no RL libraries). Only `nu
 
 ---
 
+## Authors
+
+- **Adriano Ribeiro Franulovic Campos**
+- **Andrei Quaresma Pinto**
+- **Matheus Ferracciú Scatolin**
+- **Pietro Fernandes Magaldi**
+- **Tiago Perrupato Antunes**
+
+---
+
 ## Project layout
 
 ```
@@ -247,15 +257,3 @@ See [assets/README.md](assets/README.md). TL;DR:
 - Sound effects: synthesized with NumPy (public domain along with the rest of the project)
 
 All assets are either CC0 or OFL, so no attribution is required — this list is here for transparency.
-
----
-
-## Roadmap
-
-Ideas that are intentionally **out of scope** for this milestone live in [ROADMAP.md](ROADMAP.md) — new algorithms (SARSA, Double Q, Policy Iteration), procedural maze generator, multi-seed confidence bands, HTML reports, human-playable mode, and more.
-
----
-
-## Notes on headless execution (Matplotlib)
-
-`main.py` forces the non-interactive backend (`Agg`) and sets cache directories under `output/` to avoid permission issues in restricted environments.
